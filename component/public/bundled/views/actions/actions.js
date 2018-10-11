@@ -180,6 +180,9 @@ nabu.page.views.PageActions = Vue.component("page-actions", {
 			}
 		},
 		listRoutes: function(value, includeValue) {
+			if (value && value.charAt(0) == "=") {
+				return [value];
+			}
 			var routes = this.$services.router.list().map(function(x) { return x.alias });
 			if (value) {
 				routes = routes.filter(function(x) { return x.toLowerCase().indexOf(value.toLowerCase()) >= 0 });
@@ -221,6 +224,9 @@ nabu.page.views.PageActions = Vue.component("page-actions", {
 				if (action.route) {
 					var parameters = {};
 					var self = this;
+					if (action.route.charAt(0) == "=") {
+						action.route = this.$services.page.interpret(action.route, this);
+					}
 					Object.keys(action.bindings).map(function(key) {
 						var parts = action.bindings[key].split(".");
 						var value = self.state;
