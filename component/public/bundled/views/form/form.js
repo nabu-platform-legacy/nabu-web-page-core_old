@@ -807,6 +807,22 @@ Vue.component("page-form-configure-single", {
 			if (!field.value) {
 				Vue.set(field, "value", null);
 			}
+		},
+		listPossibleNames: function (value) {
+			var fieldNames = this.possibleFields;
+			if (value) {
+				fieldNames = fieldNames.filter(function(x) { return x.toLowerCase().indexOf(value.toLowerCase()) >= 0 });
+			}
+			fieldNames.sort();
+			return fieldNames;
+		},
+		listPossibleTypes: function (value) {
+			var fieldTypes = this.types;
+			if (value) {
+				fieldTypes = fieldTypes.filter(function(x) { return x.toLowerCase().indexOf(value.toLowerCase()) >= 0 });
+			}
+			fieldTypes.sort();
+			return fieldTypes;
 		}
 	}
 });
