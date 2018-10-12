@@ -123,13 +123,13 @@
 
 <template id="page-form-configure-single">
 	<div class="page-form-single-field">
-		<n-form-combo v-model="field.name" label="Field Name" :items="possibleFields"/>
+		<n-form-combo v-model="field.name" label="Field Name" :filter="listPossibleNames"/>
 		<n-form-text v-model="field.label" label="Label" v-if="allowLabel" />
 		<n-form-text v-model="field.hidden" label="Hide field if" v-if="hidable" />
 		<n-form-text v-model="field.group" label="Field Group" v-if="groupable && !field.joinGroup" />
 		<n-form-checkbox v-model="field.joinGroup" label="Join Field Group" v-if="groupable && !field.group" />
 		<n-form-text v-model="field.description" label="Description" v-if="allowDescription" />
-		<n-form-combo v-model="field.type" label="Type" :items="types"/>
+		<n-form-combo v-model="field.type" label="Type" :filter="listPossibleTypes"/>
 		<n-form-text v-model="field.value" v-if="field.type == 'fixed'" label="Fixed Value"/>
 		
 		<component v-if="field.type && ['fixed'].indexOf(field.type) < 0"
