@@ -8,6 +8,7 @@
 							:filter="function(value) { return $services.page.classes('page-actions', value) }"/>
 						<n-form-text v-model="cell.state.activeClass" label="Active Class"/>
 						<n-form-switch v-model="cell.state.useButtons" label="Use Buttons"/>
+						<n-form-switch v-model="cell.state.useClick" label="Click to open children"/>
 						<n-form-combo v-model="cell.state.defaultAction" label="Default Action"
 							:filter="function() { return cell.state.actions.map(function(x) { return x.label }) }"/>
 					</n-collapsible>
@@ -57,7 +58,7 @@
 		<li v-for="action in getActions()" v-if="isVisible(action)"
 				class="page-action"
 				:class="[{ 'has-children': action.actions.length }, action.class]"
-				@mouseover="show(action)" @mouseout="hide(action)"
+				@mouseover="show(action)" @mouseout="hide(action)" @click.stop="toggle(action)"
 				:sequence="getActions().indexOf(action) + 1">
 			<span v-if="edit" class="fa fa-cog" @click="configureAction(action)"></span>
 			<a auto-close-actions class="page-action-link page-action-entry" href="javascript:void(0)"
