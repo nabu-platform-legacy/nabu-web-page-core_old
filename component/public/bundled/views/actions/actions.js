@@ -119,6 +119,9 @@ nabu.page.views.PageActions = Vue.component("page-actions", {
 			if (!state.useButtons) {
 				Vue.set(state, "useButtons", false);	
 			}
+			if (!state.useClick) {
+				Vue.set(state, "useClick", false);	
+			}			
 			state.actions.map(function(action) {
 				if (!action.activeRoutes) {
 					Vue.set(action, "activeRoutes", []);
@@ -170,14 +173,27 @@ nabu.page.views.PageActions = Vue.component("page-actions", {
 		},
 		hide: function(action) {
 			var index = this.showing.indexOf(action);
-			if (index >= 0) {
+			if (!this.cell.state.useClick && index >= 0) {
 				this.showing.splice(index, 1);
 			}
 		},
 		show: function(action) {
-			if (this.showing.indexOf(action) < 0) {
+			if (!this.cell.state.useClick && this.showing.indexOf(action) < 0) {
 				this.showing.push(action);
 			}
+		},
+		toggle: function(action) {
+			var index = this.showing.indexOf(action);
+			if (index < 0) {
+				this.showing.push(action);
+			}
+			else {
+				this.showing.splice(index, 1);
+			}
+		},
+		closeAll: function() {
+			this.showing.splice(0, this.showing.length);
+			this.$emit("close");
 		},
 		listRoutes: function(value, includeValue) {
 			var routes = this.$services.router.list().map(function(x) { return x.alias });
@@ -218,6 +234,7 @@ nabu.page.views.PageActions = Vue.component("page-actions", {
 		},
 		handle: function(action, force) {
 			if (force || !this.isDisabled(action)) {
+				this.closeAll();
 				if (action.route) {
 					var route = action.route;
 					if (route.charAt(0) == "=") {
