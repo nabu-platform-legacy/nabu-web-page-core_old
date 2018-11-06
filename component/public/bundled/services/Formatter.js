@@ -61,6 +61,12 @@ nabu.services.VueService(Vue.extend({
 				return result;
 			}
 		},
+		date: function (date) {
+			if ( !(date instanceof Date) ) {
+				return date;
+			}
+			return [this.leftpad(date.getDate()), this.leftpad(date.getMonth() + 1), date.getFullYear()].join("/");
+		},
 		date: function(date, format) {
 			if (!date) {
 				return null;
@@ -98,6 +104,38 @@ nabu.services.VueService(Vue.extend({
 			format = format.replace(/=/g, date.getMonth() + 1);
 			return format;
 		},
+		humanDate: function (date) {
+			if (!date) {
+				date = new Date();
+			}
+			var months = [
+				"%{date:januari}",
+				"%{date:februari}",
+				"%{date:maart}",
+				"%{date:april}",
+				"%{date:mei}",
+				"%{date:juni}",
+				"%{date:juli}",
+				"%{date:augustus}",
+				"%{date:september}",
+				"%{date:oktober}",
+				"%{date:november}",
+				"%{date:december}"
+			]
+			return date.getDate() + " " + months[date.getMonth()] + " " + date.getFullYear();
+		},
+		dateTime: function (date) {
+			var datePart = this.date(date);
+			var time = [this.leftpad(date.getHours(), this.leftpad(date.getMinutes()))].join(":");
+			return datePart + ' - ' + time
+		},
+		dateRangeToDays: function (startDate, endDate) {
+			var oneDay = 24 * 60 * 60 * 1000;
+			if ( !endDate ) {
+				endDate = new Date();
+			}
+			return Math.round(Math.abs(startDate.getTime() - endDate.getTime())/oneDay);
+		},		
 		masterdata: function(id) {
 			if (!id) {
 				return "";
@@ -118,6 +156,23 @@ nabu.services.VueService(Vue.extend({
 				input = parseFloat(input);
 			}
             return input.toFixed(amountOfDecimals);
+		},
+		stringToHslColor: function (string, saturation, lightness) {
+			saturation = 80;
+			lightness = 80;
+			var hash = 0;
+			for (var i = 0; i < string.length; i++) {
+				hash = string.charCodeAt(i) + ((hash << 5) - hash);
+			}
+			var hue = hash % 360;
+			return 'hsl('+ hue +', '+ saturation +'%, '+ lightness +'%)';
+		},
+		address: function (address) {
+			return address.street + " " + address.number + " - " + address.postCode + " " + address.city;
+		},
+		// HELPERS
+		leftpad: function (input) {
+			return ("0" + input).slice(-2);
 		}
 	}
 }), { name: "nabu.page.services.Formatter" });
