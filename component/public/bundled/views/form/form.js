@@ -489,7 +489,7 @@ nabu.page.views.PageForm = Vue.extend({
 							self.messages.push({
 								type: "request",
 								severity: "error",
-								title: parsed.message
+								title: parsed.title
 							})
 						}
 						catch (exception) {
