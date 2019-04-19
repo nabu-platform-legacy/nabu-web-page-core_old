@@ -661,6 +661,7 @@ nabu.page.views.PageForm = Vue.extend({
 					Vue.set(tmp, parts[parts.length - 1], self.$services.page.getBindingValue(pageInstance, self.cell.bindings[name]));
 				}
 			});
+			transformed.page = this.state;
 			return transformed;
 		},
 		changed: function() {
