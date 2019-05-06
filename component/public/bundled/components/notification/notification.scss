@@ -1,0 +1,83 @@
+.global-notifications {
+	position: fixed;
+	right: 1rem;
+	bottom: 1rem;
+	@include media("<=tablet") {
+		bottom: 5rem;
+		@include media("<=phone") {
+			right: 0;
+		}
+	}
+}
+
+.a-notification {
+	align-items: stretch;
+	display: flex;
+	flex-flow: row nowrap;
+	.icon-wrapper {
+		align-items: center;
+		display: flex;
+		flex-flow: row nowrap;
+		justify-content: center;
+		.icon {
+			height: 2rem;
+			text-align: center;
+			width: 2rem;
+			&:before {
+				color: $beta-color;
+				font-size: 2rem;
+			}
+		}
+	}
+	.content {
+		display: flex;
+		flex: 1;
+		flex-flow: column nowrap;
+		justify-content: center;
+		.title {
+			
+		}
+		.message {
+			margin: 0;
+		}
+	}
+	.close {
+		cursor: pointer;
+		position: absolute;
+		top: 0.5rem;
+		right: 0.5rem;
+		.icon {
+			color: lighten($body-contrast, 40);
+			&:before {
+				font-size: 1.4rem;
+			}
+		}
+	}
+}
+
+// generic
+.a-notification.notification-generic {
+	background-color: $beta-accent-color;
+	box-shadow: $box-shadow-one;
+	.icon-wrapper {
+		padding: 1.5rem;
+		&.info {
+			background-color: $info-color;
+		}
+		&.success {
+			background-color: $success-color;
+		}
+		&.warning {
+			background-color: $warning-color;
+		}
+		&.error {
+			background-color: $danger-color;
+		}
+		.icon {
+			color: #fff;
+		}
+	}
+	.content {
+		padding: 1rem 3rem 1rem 1rem;
+	}
+}
