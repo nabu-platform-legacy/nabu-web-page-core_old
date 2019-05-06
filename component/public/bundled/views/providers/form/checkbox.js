@@ -1,5 +1,5 @@
 Vue.component("page-form-input-checkbox-configure", {
-	template: "<div/>",
+	template: "<n-form-switch v-model='field.mustCheck' label='Must Check'/>",
 	props: {
 		cell: {
 			type: Object,
@@ -18,7 +18,9 @@ Vue.component("page-form-input-checkbox-configure", {
 
 Vue.component("page-form-input-checkbox", {
 	template: "<n-form-checkbox ref='form'"
+			+ "		:edit='!readOnly'"
 			+ "		:schema='schema'"
+			+ "		:must-check='field.mustCheck'"
 			+ "		@input=\"function(newValue) { $emit('input', newValue) }\""
 			+ "		:label='label'"
 			+ "		:value='value'"
@@ -53,6 +55,10 @@ Vue.component("page-form-input-checkbox", {
 		},
 		schema: {
 			type: Object,
+			required: false
+		},
+		readOnly: {
+			type: Boolean,
 			required: false
 		}
 	},

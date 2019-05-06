@@ -35,8 +35,12 @@
 					<n-form-text v-model="page.content.category" label="Category" />
 					<n-form-text v-model="page.content.path" label="Path"/>
 					<n-form-text v-model="page.content.class" label="Class"/>
+					<n-form-text v-model="page.content.title" label="Title"/>
 					<n-form-switch label="Is slow" v-if="!page.content.initial" v-model="page.content.slow"/>
 					<n-form-combo label="Page Type" :items="['page', 'email']" v-model="page.content.pageType"/>
+					<n-form-combo label="Page Parent" :filter="filterRoutes" v-model="page.content.pageParent"/>
+					<n-form-text v-model="page.content.defaultAnchor" label="Default Content Anchor"/>
+					<n-form-switch label="Route Error in Self" v-model="page.content.errorInSelf"/>
 					
 					<div class="list" v-if="page.content.roles">
 						<div v-for="i in Object.keys(page.content.roles)" class="list-row">
@@ -51,7 +55,7 @@
 						<button @click="addState">Add State</button>
 					</div>
 					<n-collapsible class="list-item" :title="state.name" v-for="state in page.content.states">
-						<n-form-text v-model="state.name" label="Name" :required="true"/>
+						<n-form-text :value="state.name" @input="function(newValue) { if (!validateStateName(newValue).length) state.name = newValue; }" label="Name" :required="true" :validator="validateStateName"/>
 						<n-form-combo :value="state.operation" :filter="getStateOperations" label="Operation" @input="function(newValue) { setStateOperation(state, newValue) }"/>
 						<n-page-mapper v-if="state.operation && Object.keys($services.page.getPageParameters(page)).length" :to="getOperationParameters(state.operation)"
 							:from="{page:$services.page.getPageParameters(page)}" 
@@ -59,6 +63,13 @@
 						<div class="list-item-actions">
 							<button @click="page.content.states.splice(page.content.states.indexOf(state), 1)"><span class="fa fa-trash"></span></button>
 						</div>
+						<div class="list" v-if="state.refreshOn">
+							<div v-for="i in Object.keys(state.refreshOn)" class="list-row">
+								<n-form-combo v-model="state.refreshOn[i]" :filter="getAvailableEvents" placeholder="event"/>
+								<button @click="state.refreshOn.splice(i)"><span class="fa fa-trash"></span></button>
+							</div>
+						</div>
+						<button @click="state.refreshOn ? state.refreshOn.push('') : $window.Vue.set(state, 'refreshOn', [''])">Add Refresh Event</button>
 					</n-collapsible>
 				</n-collapsible>
 				<n-collapsible title="Query Parameters">
@@ -79,7 +90,7 @@
 						<n-form-combo v-model="parameter.type" label="Type" :nillable="false" :filter="getParameterTypes"/>
 						<n-form-combo v-model="parameter.format" label="Format" v-if="parameter.type == 'string'" :items="['date-time', 'uuid', 'uri', 'date', 'password']"/>
 						<n-form-text v-model="parameter.default" label="Default Value"/>
-						<n-form-switch v-model="parameter.global" label="Is global?"/>
+						<n-form-switch v-model="parameter.global" label="Is translation global?"/>
 						<div class="list-row" v-for="i in Object.keys(parameter.listeners)">
 							<n-form-combo v-model="parameter.listeners[i]" :filter="function() { return $services.page.getAllAvailableKeys(page) }"/>
 							<button @click="parameter.listeners.splice(i, 1)"><span class="fa fa-trash"></span></button>
@@ -98,11 +109,13 @@
 						<n-form-text v-model="action.name" label="Name" :required="true"/>
 						<n-form-text v-model="action.confirmation" label="Confirmation Message"/>
 						<n-form-combo v-model="action.on" label="Trigger On" :filter="getAvailableEvents"/>
-						<n-form-text v-model="action.scroll" label="Scroll to" v-if="!action.operation && !action.route"/>
-						<n-form-combo v-model="action.route" v-if="!action.operation && !action.scroll" label="Redirect" :filter="filterRoutes"/>
-						<n-form-combo v-model="action.anchor" v-if="action.route" label="Anchor" :filter="function(value) { return value ? [value, '$blank', '$window'] : ['$blank', '$window'] }"/>
-						<n-form-combo v-model="action.operation" v-if="!action.route && !action.scroll" label="Operation" :filter="getOperations" />
-						<n-form-switch v-if="action.operation" v-model="action.isSlow" label="Is slow operation?"/>
+						<n-form-text v-model="action.scroll" label="Scroll to" v-if="!action.operation && !action.function"/>
+						<n-form-combo v-model="action.route" v-if="!action.operation && !action.url && !action.function" label="Redirect" :filter="filterRoutes"/>
+						<n-form-combo v-model="action.anchor" v-if="action.route || (action.operation && isGet(action.operation))" label="Anchor" :filter="function(value) { return value ? [value, '$blank', '$window'] : ['$blank', '$window'] }"/>
+						<n-form-combo v-model="action.operation" v-if="!action.route && !action.scroll && !action.url && !action.function" label="Operation" :filter="getOperations" />
+						<n-form-combo v-model="action.function" v-if="!action.route && !action.scroll && !action.url && !action.operation" label="Function" :filter="$services.page.listFunctions" />
+						<n-form-text v-model="action.url" label="URL" v-if="!action.route && !action.operation && !action.scroll && !action.function"/>
+						<n-form-switch v-if="action.operation || action.function" v-model="action.isSlow" label="Is slow operation?"/>
 						<n-form-text v-if="action.operation" v-model="action.event" label="Success Event" :timeout="600" @input="resetEvents()"/>
 						<n-form-switch v-if="action.operation" v-model="action.expandBindings" label="Field level bindings"/>
 						<div class="list-row">
@@ -119,6 +132,10 @@
 						<n-page-mapper v-if="action.route" :to="$services.page.getRouteParameters($services.router.get(action.route))"
 							:from="availableParameters" 
 							v-model="action.bindings"/>
+						<n-page-mapper v-if="action.function && !action.operation && !action.route" :to="$services.page.getFunctionInput(action.function)"
+							:from="availableParameters" 
+							v-model="action.bindings"/>
+							
 						<div class="list-item-actions">
 							<button @click="page.content.actions.splice(page.content.actions.indexOf(action), 1)"><span class="fa fa-trash"></span></button>
 						</div>
@@ -166,6 +183,9 @@
 						</n-form-section>
 					</n-form-section>
 				</n-collapsible>
+				<component v-for="plugin in plugins" :is="plugin.configure" 
+					:page="page" 
+					:edit="edit"/>
 			</n-form>
 		</n-sidebar>
 		<n-page-rows :rows="page.content.rows" v-if="page.content.rows" :page="page" :edit="edit"
@@ -190,6 +210,17 @@
 				v-bind="getRendererProperties(row)">
 			<div v-if="(edit || $services.page.wantEdit) && row.name && !row.collapsed" :style="getRowEditStyle(row)" class="row-edit-label"
 				:class="'direction-' + (row.direction ? row.direction : 'horizontal')"><span>{{row.name}}</span></div>
+			<div class="page-row-menu n-page-menu" v-if="edit">
+				<label v-if="row.collapsed">{{row.name}}</label>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="configuring = row.id"><span class="fa fa-cog"></span></button>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="up(row)"><span class="fa fa-chevron-circle-up"></span></button>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="down(row)"><span class="fa fa-chevron-circle-down"></span></button>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="addCell(row)"><span class="fa fa-plus" title="Add Cell"></span></button>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="copyRow(row)"><span class="fa fa-copy" title="Copy Row"></span></button>
+				<button v-if="!row.collapsed && $services.page.copiedCell" :style="rowButtonStyle(row)" @click="pasteCell(row)"><span class="fa fa-paste" title="Paste Cell"></span></button>
+				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="$emit('removeRow', row)"><span class="fa fa-times" title="Remove Row"></span></button>
+				<button :style="rowButtonStyle(row)" @click="row.collapsed = !row.collapsed"><span class="fa" :class="{'fa-minus-square': !row.collapsed, 'fa-plus-square': row.collapsed }"></span></button>
+			</div>
 			<div v-if="row.customId" class="custom-row custom-id" :id="row.customId"><!-- to render stuff in without disrupting the other elements here --></div>
 			<component :is="cellTagFor(row, cell)" :style="getStyles(cell)" v-for="cell in getCalculatedCells(row)" v-if="shouldRenderCell(row, cell)" 
 					:id="page.name + '_' + row.id + '_' + cell.id" 
@@ -198,6 +229,7 @@
 					:cell-key="'page_' + pageInstanceId + '_cell_' + cell.id"
 					@click="clickOnCell(cell)"
 					v-bind="getRendererProperties(cell)">
+				<div v-if="(edit || $services.page.wantEdit) && cell.name" :style="getCellEditStyle(cell)" class="cell-edit-label"><span>{{cell.name}}</span></div>
 				<div v-if="cell.customId" class="custom-cell custom-id" :id="cell.customId"><!-- to render stuff in without disrupting the other elements here --></div>
 				<n-sidebar v-if="configuring == cell.id" @close="configuring = null" class="settings" key="cell-settings">
 					<n-form class="layout2" key="cell-form">
@@ -230,6 +262,7 @@
 								<n-form-text label="Cell Width (flex or other)" v-model="cell.width"/>
 								<n-form-text label="Cell Height (any)" v-model="cell.height"/>
 								<n-form-text label="Click Event" v-model="cell.clickEvent" :timeout="600" @input="resetEvents"/>
+								<n-form-text label="Cell Reference" v-model="cell.ref"/>
 								<n-form-text label="Class" v-model="cell.class"/>
 								<n-form-combo label="Cell Renderer" v-model="cell.renderer" :items="getRenderers('cell')" :formatter="function(x) { return x.name }" :extracter="function(x) { return x.name }"/>
 								<n-form-section v-if="cell.renderer">
@@ -250,24 +283,25 @@
 								</div>
 							</n-collapsible>
 							<n-collapsible title="Eventing" key="cell-events">
-								<n-form-combo label="Show On" v-model="cell.on" :filter="getAvailableEvents"/>
-								<n-form-combo label="Target" v-if="cell.on" :items="['page', 'sidebar', 'prompt']" v-model="cell.target"/>
+								<n-form-switch label="Closeable" v-model="cell.closeable" v-if="!cell.on"/>
+								<n-form-combo label="Show On" v-model="cell.on" :filter="getAvailableEvents" v-if="!cell.closeable"/>
+								<n-form-combo label="Target" :items="['page', 'sidebar', 'prompt']" v-model="cell.target"/>
+								<n-form-switch label="Prevent Auto Close" v-model="cell.preventAutoClose" v-if="cell.target == 'sidebar'"/>
 							</n-collapsible>
 						</n-form-section>
 					</n-form>
 				</n-sidebar>
 				<div class="page-cell-menu n-page-menu" v-if="edit">
-					<span v-if="cell.name">{{cell.name}}</span>
-					<button @click="configuring = cell.id"><span class="fa fa-magic" title="Set Cell Content"></span></button>
-					<button @click="configure(cell)" v-if="cell.alias"><span class="fa fa-cog" title="Configure Cell Content"></span></button>
-					<button @click="left(row, cell)"><span class="fa fa-chevron-circle-left"></span></button>
-					<button @click="right(row, cell)"><span class="fa fa-chevron-circle-right"></span></button>
-					<button @click="cellUp(row, cell)"><span class="fa fa-chevron-circle-up"></span></button>
-					<button @click="cellDown(row, cell)"><span class="fa fa-chevron-circle-down"></span></button>
-					<button @click="addRow(cell)"><span class="fa fa-plus" title="Add Row"></span></button>
-					<button @click="removeCell(row.cells, cell)"><span class="fa fa-times" title="Remove Cell"></span></button>
-					<button @click="copyCell(cell)"><span class="fa fa-copy" title="Copy Cell"></span></button>
-					<button @click="pasteRow(cell)" v-if="$services.page.copiedRow"><span class="fa fa-paste" title="Paste Row"></span></button>
+					<button @click="configuring = cell.id"><span class="fa fa-magic" title="Set Cell Content"></span></button
+					><button @click="configure(cell)" v-if="cell.alias"><span class="fa fa-cog" title="Configure Cell Content"></span></button
+					><button @click="left(row, cell)" v-if="row.cells.length >= 2"><span class="fa fa-chevron-circle-left"></span></button
+					><button @click="right(row, cell)" v-if="row.cells.length >= 2"><span class="fa fa-chevron-circle-right"></span></button
+					><button @click="cellUp(row, cell)" v-if="false"><span class="fa fa-chevron-circle-up"></span></button
+					><button @click="cellDown(row, cell)" v-if="false"><span class="fa fa-chevron-circle-down"></span></button
+					><button @click="addRow(cell)"><span class="fa fa-plus" title="Add Row"></span></button
+					><button @click="removeCell(row.cells, cell)"><span class="fa fa-times" title="Remove Cell"></span></button
+					><button @click="copyCell(cell)"><span class="fa fa-copy" title="Copy Cell"></span></button
+					><button @click="pasteRow(cell)" v-if="$services.page.copiedRow"><span class="fa fa-paste" title="Paste Row"></span></button>
 				</div>
 				
 				<div v-if="edit">
@@ -282,7 +316,7 @@
 						@removeRow="function(row) { $confirm({message:'Are you sure you want to remove this row?'}).then(function() { cell.rows.splice(cell.rows.indexOf(row), 1) }) }"/>
 				</div>
 				<template v-else-if="shouldRenderCell(row, cell)">
-					<n-sidebar v-if="cell.target == 'sidebar'" @close="close(cell)" :popout="false">
+					<n-sidebar v-if="cell.target == 'sidebar'" @close="close(cell)" :popout="false" :autocloseable="!cell.preventAutoClose" class="content-sidebar" :style="getSideBarStyles(cell)">
 						<div @keyup.esc="close(cell)" :key="'page_' + pageInstanceId + '_rendered_' + cell.id" v-if="cell.alias" v-route-render="{ alias: cell.alias, parameters: getParameters(row, cell), mounted: getMountedFor(cell, row), rerender: function() { return !stopRerender && !cell.stopRerender } }"></div>
 						<n-page-rows v-if="cell.rows && cell.rows.length" :rows="cell.rows" :page="page" :edit="edit"
 							:parameters="parameters"
@@ -305,7 +339,7 @@
 							@removeRow="function(row) { $confirm({message:'Are you sure you want to remove this row?'}).then(function() { cell.rows.splice(cell.rows.indexOf(row), 1) }) }"/>
 					</n-prompt>
 					<template v-else>
-						<div :key="'page_' + pageInstanceId + '_rendered_' + cell.id" v-if="cell.alias" v-route-render="{ alias: cell.alias, parameters: getParameters(row, cell), mounted: getMountedFor(cell, row), rerender: function() { $window.console.log('stopping', stopRerender); return !stopRerender && !cell.stopRerender } }"></div>
+						<div :key="'page_' + pageInstanceId + '_rendered_' + cell.id" v-if="cell.alias" v-route-render="{ alias: cell.alias, parameters: getParameters(row, cell), mounted: getMountedFor(cell, row), rerender: function() { return !stopRerender && !cell.stopRerender } }"></div>
 						<n-page-rows v-if="cell.rows && cell.rows.length" :rows="cell.rows" :page="page" :edit="edit"
 							:parameters="parameters"
 							:events="events"
@@ -358,17 +392,6 @@
 					</n-collapsible>
 				</n-form>
 			</n-sidebar>
-			<div class="page-row-menu n-page-menu" v-if="edit">
-				<label v-if="row.collapsed">{{row.name}}</label>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="configuring = row.id"><span class="fa fa-cog"></span></button>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="up(row)"><span class="fa fa-chevron-circle-up"></span></button>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="down(row)"><span class="fa fa-chevron-circle-down"></span></button>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="addCell(row)"><span class="fa fa-plus" title="Add Cell"></span></button>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="copyRow(row)"><span class="fa fa-copy" title="Copy Row"></span></button>
-				<button v-if="!row.collapsed && $services.page.copiedCell" :style="rowButtonStyle(row)" @click="pasteCell(row)"><span class="fa fa-paste" title="Paste Cell"></span></button>
-				<button v-if="!row.collapsed" :style="rowButtonStyle(row)" @click="$emit('removeRow', row)"><span class="fa fa-times" title="Remove Row"></span></button>
-				<button :style="rowButtonStyle(row)" @click="row.collapsed = !row.collapsed"><span class="fa" :class="{'fa-minus-square': !row.collapsed, 'fa-plus-square': row.collapsed }"></span></button>
-			</div>
 		</component>
 	</div>
 </template>

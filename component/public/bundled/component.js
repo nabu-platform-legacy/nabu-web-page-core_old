@@ -55,6 +55,20 @@ window.addEventListener("load", function() {
 			}
 		});
 		
+		$services.router.register({
+			alias: "page-youtube",
+			enter: function(parameters) {
+				return new nabu.page.views.Youtube({propsData: parameters});
+			}
+		});
+		
+		$services.router.register({
+			alias: "page-skeleton-email",
+			enter: function(parameters) {
+				return new nabu.page.skeletons.Email({propsData: parameters});
+			}
+		});
+		
 		// fragment providers
 		nabu.page.provide("page-field-fragment", { 
 			component: "page-field-fragment-data", 
@@ -114,6 +128,12 @@ window.addEventListener("load", function() {
 			namespace: "nabu.page"
 		});
 		nabu.page.provide("page-form-input", { 
+			component: "page-form-input-password", 
+			configure: "page-form-input-password-configure", 
+			name: "password",
+			namespace: "nabu.page"
+		});
+		nabu.page.provide("page-form-input", { 
 			component: "page-form-input-slider", 
 			configure: "page-form-input-slider-configure", 
 			name: "slider",
@@ -161,6 +181,26 @@ window.addEventListener("load", function() {
 			name: "static-image",
 			namespace: "nabu.page"
 		});
+		nabu.page.provide("page-form-input", { 
+			component: "page-form-input-file", 
+			configure: "page-form-input-file-configure", 
+			name: "file",
+			namespace: "nabu.page"
+		});
+		nabu.page.provide("page-form-input", { 
+			component: "page-form-input-location", 
+			configure: "page-form-input-location-configure", 
+			name: "location",
+			namespace: "google",
+			multipleFields: true
+		});
+		nabu.page.provide("page-form-input", { 
+			component: "page-form-input-address", 
+			configure: "page-form-input-address-configure", 
+			name: "address",
+			namespace: "google",
+			multipleFields: true
+		});
 		
 		// form list providers
 		nabu.page.provide("page-form-list-input", { 
@@ -187,11 +227,22 @@ window.addEventListener("load", function() {
 		// formatters
 		nabu.page.provide("page-format", {
 			format: function(id, fragment, page, cell) {
-				var result = $services.pageResolver.resolve(fragment.resolveOperation, fragment.resolveOperationIds, fragment.resolveOperationId, id);
+				var properties = null;
+				var self = this;
+				var pageInstance = $services.page.getPageInstance(page, this);
+				if (fragment && fragment.resolveOperationBinding) {
+					properties = {};
+					Object.keys(fragment.resolveOperationBinding).map(function(key) {
+						if (fragment.resolveOperationBinding[key]) {
+							var bindingValue = $services.page.getBindingValue(pageInstance, fragment.resolveOperationBinding[key]);
+							properties[key] = bindingValue;
+						}
+					});
+				}
+				var result = $services.pageResolver.resolve(fragment.resolveOperation, fragment.resolveOperationIds, fragment.resolveOperationId, id, properties);
 				// the content is not there yet at time of serialization, need to update when it is...
 				// put the resulting string in watched storage, use updated in the component to redo the string!
 				if (result && fragment.resolveOperationLabelComplex) {
-					var pageInstance = $services.page.getPageInstance(page, this);
 					
 					var storageId = "resolve." + JSON.stringify(fragment) + "." + fragment.resolveOperation + "." + id;
 					storageId = storageId.replace(/\./g, "_");
@@ -224,6 +275,7 @@ window.addEventListener("load", function() {
 					return result && fragment.resolveOperationLabel ? result[fragment.resolveOperationLabel] : result;
 				}
 			},
+			skipCompile: true,
 			html: true,
 			configure: "page-format-resolver",
 			name: "resolve",

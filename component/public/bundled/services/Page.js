@@ -18,12 +18,13 @@ nabu.page.providers = function(spec) {
 nabu.page.instances = {};
 
 nabu.services.VueService(Vue.extend({
-	services: ["swagger"],
+	services: ["swagger", "user"],
 	data: function() {
 		return {
 			counter: 1,
 			title: null,
 			home: null,
+			homeUser: null,
 			pages: [],
 			loading: true,
 			// application properties
@@ -32,8 +33,13 @@ nabu.services.VueService(Vue.extend({
 			devices: [],
 			// application styles
 			styles: [],
+			// functions
+			functions: [],
 			// custom content
 			contents: [],
+			// any imports
+			imports: [],
+			translations: [],
 			lastCompiled: null,
 			customStyle: null,
 			cssStep: null,
@@ -44,7 +50,9 @@ nabu.services.VueService(Vue.extend({
 			useEval: false,
 			cssLastModified: null,
 			cssError: null,
-			disableReload: false
+			functionError: null,
+			disableReload: false,
+			validations: []
 		}
 	},
 	activate: function(done) {
@@ -70,10 +78,10 @@ nabu.services.VueService(Vue.extend({
 			}
 		});
 		this.isServerRendering = navigator.userAgent.match(/Nabu-Renderer/);
-		this.activate(done);
+		this.activate(done, true);
 	},
 	clear: function(done) {
-		this.activate(done ? done : function() {});
+		this.activate(done ? done : function() {}, false);
 	},
 	computed: {
 		enumerators: function() {
@@ -82,6 +90,9 @@ nabu.services.VueService(Vue.extend({
 				providers[x.name] = x;
 			});
 			return providers;
+		},
+		isSsr: function() {
+			return navigator.userAgent.match(/Nabu-Renderer/);
 		}
 	},
 	created: function() {
@@ -98,6 +109,14 @@ nabu.services.VueService(Vue.extend({
 		});
 	},
 	methods: {
+		getAvailableTypes: function(value) {
+			var types = ['string', 'boolean', 'number', 'integer'];
+			nabu.utils.arrays.merge(types, Object.keys(this.$services.swagger.swagger.definitions));
+			if (value) {
+				types = types.filter(function(x) { return x.toLowerCase().indexOf(value.toLowerCase()) >= 0 });
+			}
+			return types;
+		},
 		getContent: function(page, key) {
 			// if we are in development mode and no explicit language choice is made, don't show the contents, you want the json values
 			if (${environment("development")} && (!this.$services.language || !this.$services.language.cookieValue)) {
@@ -122,7 +141,7 @@ nabu.services.VueService(Vue.extend({
 				
 			}
 		},
-		activate: function(done) {
+		activate: function(done, initial) {
 			var self = this;
 		
 			var injectJavascript = function() {
@@ -155,6 +174,7 @@ nabu.services.VueService(Vue.extend({
 				self.properties.splice(0, self.properties.length);
 				self.devices.splice(0, self.devices.length);
 				self.contents.splice(0);
+				self.translations.splice(0);
 				if (configuration.pages) {
 					nabu.utils.arrays.merge(self.pages, configuration.pages);
 					self.loadPages(self.pages);
@@ -170,10 +190,29 @@ nabu.services.VueService(Vue.extend({
 				}
 				if (configuration.home) {
 					self.home = configuration.home;
-					self.registerHome(configuration.home);
+				}
+				if (configuration.homeUser) {
+					self.homeUser = configuration.homeUser;
 				}
 				if (configuration.contents) {
 					nabu.utils.arrays.merge(self.contents, configuration.contents);
+				}
+				if (configuration.translations) {
+					nabu.utils.arrays.merge(self.translations, configuration.translations);
+				}
+				if (configuration.imports) {
+					nabu.utils.arrays.merge(self.imports, configuration.imports);
+				}
+				if (self.home || self.homeUser) {
+					self.registerHome(self.home, self.homeUser);
+				}
+				// don't do imports for server rendering, they should not be critical to the page and might not be parseable
+				if (!navigator.userAgent.match(/Nabu-Renderer/)) {
+					self.imports.forEach(function(x) {
+						if (x.type == 'javascript') {
+							self.inject(x.link, function() {}, x.async);
+						}
+					});
 				}
 				if (self.canEdit()) {
 					var promises = [];
@@ -181,6 +220,11 @@ nabu.services.VueService(Vue.extend({
 					promises.push(self.$services.swagger.execute("nabu.web.page.core.rest.style.list").then(function(list) {
 						if (list.styles) {
 							nabu.utils.arrays.merge(self.styles, list.styles);
+						}
+					}));
+					promises.push(self.$services.swagger.execute("nabu.web.page.core.rest.function.list").then(function(list) {
+						if (list.styles) {
+							nabu.utils.arrays.merge(self.functions, list.styles.map(function(x) { return JSON.parse(x.content) }));
 						}
 					}));
 					self.$services.q.all(promises).then(function() {
@@ -226,7 +270,7 @@ nabu.services.VueService(Vue.extend({
 					content: style.content
 				}});
 			}, function(error) {
-				var parsed = JSON.parse(error.responseText);
+				var parsed = error.responseText ? JSON.parse(error.responseText) : error;
 				if (parsed.description) {
 					self.cssError = parsed.description.replace(/[\s\S]*CompilationException:([^\n]+)[\s\S]*/g, "$1");
 				}
@@ -243,13 +287,17 @@ nabu.services.VueService(Vue.extend({
 						var globalName = event.globalName ? event.globalName : event.localName;
 						if (globalName != null) {
 							if (events[globalName] == null) {
-								events[globalName] = {properties:{}}
+								var properties = event.properties;
+								// if we have an instance of it, we can resolve the definition
+								if (nabu.page.instances[page.content.name]) {
+									properties = nabu.page.instances[page.content.name].getEvents()[event.localName];
+								}
+								events[globalName] = properties == null ? {properties:{}} : properties;
 							}
 						}
 					});
 				}
 			});
-			console.log("events are", events);
 			return events;
 		},
 		// push global events to all pages
@@ -316,7 +364,7 @@ nabu.services.VueService(Vue.extend({
 		reloadCss: function() {
 			var self = this;
 			nabu.utils.ajax({url:"${server.root()}page/v1/api/css-modified"}).then(function(response) {
-				if (response.responseText && !self.disableReload) {
+				if (response.responseText != null && !self.disableReload) {
 					var date = new Date(response.responseText);
 					if (!self.cssLastModified) {
 						self.cssLastModified = date;
@@ -326,6 +374,7 @@ nabu.services.VueService(Vue.extend({
 						var links = document.head.getElementsByTagName("link");
 						for (var i = 0; i < links.length; i++) {
 							var original = links[i].getAttribute("original");
+							console.log("Reloading style", links[i].href);
 							if (!original) {
 								original = links[i].href;
 								links[i].setAttribute("original", original);
@@ -338,14 +387,140 @@ nabu.services.VueService(Vue.extend({
 				setTimeout(self.reloadCss, 2000);
 			});
 		},
-		getBindingValue: function(pageInstance, bindingValue, context) {
-			while (context && !context.localState) {
-				context = context.$parent;
+		getFunctionDefinition: function(id) {
+			return this.listFunctionDefinitions().filter(function(x) { return x.id == id })[0];
+		},
+		getRunnableFunction: function(id) {
+			var parts = id.split(".");
+			var target = window;
+			for (var i = 0; i < parts.length - 1; i++) {
+				if (!target[parts[i]]) {
+					target = null;
+					break;
+				}
+				target = target[parts[i]];
 			}
-			if (context) {
-				var result = this.getValue(context.localState, bindingValue);
+			var func = target == null ? null : target[parts[parts.length - 1]];	
+			// if we didn't find a custom function, check provided ones
+			if (!func) {
+				var result = nabu.page.providers("page-function").filter(function(x) {
+					return x.id == id;
+				})[0];
 				if (result) {
-					return result;
+					func = result.implementation;
+				}
+			}
+			return func;
+		},
+		runFunction: function(func, input, context, promise) {
+			var definition = null;
+			if (typeof(func) == "string") {
+				definition = this.getFunctionDefinition(func);
+				var id = func;
+				func = this.getRunnableFunction(id);
+				if (!func) {
+					throw "Could not find function: " + id;
+				}
+			}
+			var resolve = function(result) {
+				console.log("resolving", result);
+				if (promise) {
+					promise.resolve(result);
+				}
+			};
+			var reject = function(result) {
+				if (result.responseText) {
+					result = JSON.parse(result.responseText);
+				}
+				console.log("rejecting", result);
+				if (promise) {
+					promise.reject(result);
+				}
+			};
+			try {
+				var returnValue = func(input, this.$services, context && context.$value ? context.$value : function() {}, definition && definition.async ? resolve : null, definition && definition.async ? reject : null);
+				// if not async, call the done yourself
+				if (definition && !definition.async) {
+					resolve(returnValue);
+				}
+				return returnValue;
+			}
+			catch (exception) {
+				reject(exception);
+				throw exception;
+			}
+		},
+		getBindingValue: function(pageInstance, bindingValue, context) {
+			var self = this;
+			// only useful if the binding value is a string
+			if (typeof(bindingValue) == "string") {
+				while (context && !context.localState) {
+					context = context.$parent;
+				}
+				if (context) {
+					var result = this.getValue(context.localState, bindingValue);
+					if (result) {
+						return result;
+					}
+				}
+			}
+			// if it has a label, we have a structure object
+			else if (bindingValue && bindingValue.label) {
+				if (bindingValue.label == "fixed") {
+					return bindingValue.value;
+				}
+				else if (bindingValue.label == "$function") {
+					/*
+					var parts = bindingValue.value.split(".");
+					var target = window;
+					for (var i = 0; i < parts.length - 1; i++) {
+						if (!target[parts[i]]) {
+							throw "Could not find function: " + bindingValue.value;
+						}
+						target = target[parts[i]];
+					}
+					var func = target[parts[parts.length - 1]];
+					*/
+					
+					var func = this.getRunnableFunction(bindingValue.value);
+					if (!func) {
+							throw "Could not find function: " + bindingValue.value;
+					}
+					if (bindingValue.lambda) {
+						return function() {
+							var def = self.getFunctionDefinition(bindingValue.value);
+							var input = {};
+							if (def.inputs) {
+								var tmp = arguments;
+								def.inputs.forEach(function(x, i) {
+									input[x.name] = tmp[i];
+								});
+							}
+							var output = self.runFunction(func, input, context);
+							if (bindingValue.output) {
+								output = output[bindingValue.output];
+							}
+							return output;
+						}
+					}
+					var input = {};
+					var self = this;
+					if (bindingValue.bindings) {
+						Object.keys(bindingValue.bindings).forEach(function(key) {
+							if (bindingValue.bindings[key]) {
+								var value = self.getBindingValue(pageInstance, bindingValue.bindings[key], context);
+								self.setValue(input, key, value);
+							}
+						});
+					}
+					//var result = func(input, this.$services);
+					var result = this.runFunction(func, input, context);
+					if (bindingValue.output) {
+						return this.getValue(result, bindingValue.output);
+					}
+					else {
+						return result;
+					}
 				}
 			}
 			
@@ -365,6 +540,61 @@ nabu.services.VueService(Vue.extend({
 			}
 			return value;
 		},
+		translateErrorCode: function(value, defaultValue) {
+			var translations = !value ? [] : this.translations.filter(function(x) {
+				// this is not actually a translation, fall back to defaults
+				if (x.translation == x.name) {
+					return false;
+				}
+				return value.toLowerCase() == x.name.toLowerCase()
+					|| value.match(new RegExp(x.name.replace(/\*/g, ".*")));
+			});
+			var translation = null;
+			if (translations.length > 1) {
+				translations.forEach(function(x) {
+					if (translation == null || translation.name.length < x.name.length)	 {
+						translation = x;
+					}
+				});
+			}
+			else if (translations.length == 1) {
+				translation = translations[0];
+			}
+			return translation && translation.translation 
+				? translation.translation 
+				: (defaultValue ? defaultValue : "%{An error has occurred while trying to complete your action}");
+		},
+		translate: function(value, component) {
+			if (value && value.indexOf) {
+				while (value.indexOf("%" + "{") >= 0) {
+					var start = value.indexOf("%" + "{");
+					var end = value.indexOf("}", start);
+					// no end tag
+					if (end < 0) {
+						break;
+					}
+					var available = value.substring(start + 2, end);
+					var parts = available.split(":");
+					var translation = this.translations.filter(function(x) {
+						return ((parts.length == 1 && x.context == null)
+								|| (parts.length == 2 && x.context == parts[0]))
+							&& (x.name == (parts.length == 1 ? parts[0] : parts[1]));
+					})[0];
+					value = value.substring(0, index) + (translation && translation.translation ? translation.translation : (parts.length == 1 ? parts[0] : parts[1])) + value.substring(end + 1);
+				}
+				return value;
+			}
+			/*if (value && value.indexOf && value.indexOf("%") == 0 && value.indexOf("{") == 1) {
+				available = value.replace(/^%\{([^}]+)\}$/, "$1");
+				var parts = available.split(":");
+				translation = this.translations.filter(function(x) {
+					return ((parts.length == 1 && x.context == null)
+							|| (parts.length == 2 && x.context == parts[0]))
+						&& (x.name == parts.length == 1 ? parts[0] : parts[1]);
+				})[0];
+			}*/
+			return translation == null || translation.translation == null ? available : translation.translation;
+		},
 		interpret: function(value, component) {
 			if (typeof(value) == "string" && value.length > 0 && value.substring(0, 1) == "=") {
 				value = value.substring(1);
@@ -375,6 +605,9 @@ nabu.services.VueService(Vue.extend({
 				}
 				if (stateOwner && stateOwner.localState) {
 					result = this.eval(value, stateOwner.localState, component);
+				}
+				if (result == null && stateOwner && stateOwner.state) {
+					result = this.eval(value, stateOwner.state, component);
 				}
 				if (result == null && component.page) {
 					var pageInstance = this.getPageInstance(component.page, component);
@@ -487,7 +720,7 @@ nabu.services.VueService(Vue.extend({
 			var result = pageInstance.parameters ? nabu.utils.objects.clone(pageInstance.parameters) : {};
 			// copy internal parameters as well
 			if (page.content.parameters) {
-				page.content.parameters.map(function(parameter) {
+				page.content.parameters.forEach(function(parameter) {
 					result[parameter.name] = pageInstance.get("page." + parameter.name);
 				});
 			}
@@ -519,7 +752,7 @@ nabu.services.VueService(Vue.extend({
 			}
 			else {
 				try {
-					var result = Function('"use strict";return (function(state, $services, $value) { return ' + condition + ' })')()(state, this.$services, instance ? instance.$value : function() { throw "No value function" });
+					var result = Function('"use strict";return (function(state, $services, $value, application) { return ' + condition + ' })')()(state, this.$services, instance ? instance.$value : function() { throw "No value function" }, application);
 				}
 				catch (exception) {
 					if (${environment("development")}) {
@@ -543,6 +776,10 @@ nabu.services.VueService(Vue.extend({
 					for (var i = 0; i < rules.length; i++) {
 						var rule = rules.item(i);
 						if (rule.selectorText) {
+							if (rule.selectorText.indexOf(clazz) > 0) {
+							console.log(rule.selectorText);
+								
+							}
 							if (rule.selectorText.match(new RegExp(".*\\." + clazz + "\\.([\\w-]+)\\b.*", "g"))) {
 								var match = rule.selectorText.replace(new RegExp(".*\\." + clazz + "\\.([\\w-]+)\\b.*", "g"), "$1");
 								if (result.indexOf(match) < 0) {
@@ -576,7 +813,6 @@ nabu.services.VueService(Vue.extend({
 			}
 			if (definition && definition.properties) {
 				Object.keys(definition.properties).map(function(key) {
-					console.log("checking", key, includeComplex, includeArrays);
 					// arrays can not be chosen, you need to bind them first
 					if (definition.properties[key].type != "array" || includeArrays) {
 						var childPath = (path ? path + "." : "") + key;
@@ -592,8 +828,9 @@ nabu.services.VueService(Vue.extend({
 						// if it is complex, recurse
 						if (isComplex) {
 							if (isArray) {
-								console.log("recursing array");
-								self.getSimpleKeysFor({properties:definition.properties[key].items}, includeComplex, includeArrays, keys, childPath);
+								// not sure if the ternary is needed, "definition.properties[key].items" should be correct for complex types
+								// but for backwards compatibility i don't want to mess it up
+								self.getSimpleKeysFor(definition.properties[key].items.properties ? definition.properties[key].items : {properties:definition.properties[key].items}, includeComplex, includeArrays, keys, childPath);
 							}
 							else {
 								self.getSimpleKeysFor(definition.properties[key], includeComplex, includeArrays, keys, childPath);
@@ -613,10 +850,55 @@ nabu.services.VueService(Vue.extend({
 				body: {
 					title: this.title,
 					home: this.home,
+					homeUser: this.homeUser,
 					properties: self.properties,
-					devices: self.devices
+					devices: self.devices,
+					imports: self.imports
 				}
 			});
+		},
+		listFunctionDefinitions: function() {
+			var result = [];
+			nabu.utils.arrays.merge(result, this.functions);
+			nabu.utils.arrays.merge(result, nabu.page.providers("page-function"));
+			return result;
+		},
+		listFunctions: function(value) {
+			var result = this.listFunctionDefinitions().map(function(x) { return x.id });
+			return result.filter(function(x) {
+				return !value || x.toLowerCase().indexOf(value.toLowerCase()) >= 0;
+			});
+		},
+		getFunctionInput: function(id, value) {
+			var transformer = this.$services.page.functions.filter(function(x) { return x.id == id })[0];
+			if (!transformer) {
+				transformer = nabu.page.providers("page-function").filter(function(x) { return x.id == id })[0];
+			}
+			var parameters = {};
+			var self = this;
+			if (transformer && transformer.inputs) {
+				transformer.inputs.map(function(x) {
+					parameters[x.name] = self.$services.page.getResolvedPageParameterType(x.type);
+					if (!parameters[x.name].required && x.required) {
+						parameters[x.name].required = x.required;
+					}
+				});
+			}
+			return {properties:parameters};
+		},
+		getFunctionOutput: function(id, value) {
+			var transformer = this.$services.page.functions.filter(function(x) { return x.id == id })[0];
+			if (!transformer) {
+				transformer = nabu.page.providers("page-function").filter(function(x) { return x.id == id })[0];
+			}
+			var parameters = {};
+			var self = this;
+			if (transformer && transformer.outputs) {
+				transformer.outputs.map(function(x) {
+					parameters[x.name] = self.$services.page.getResolvedPageParameterType(x.type);
+				});
+			}
+			return this.$services.page.getSimpleKeysFor({properties:parameters}, true, true);
 		},
 		saveCompiledCss: function() {
 			this.$services.swagger.execute("nabu.web.page.core.rest.style.compile", {
@@ -625,6 +907,66 @@ nabu.services.VueService(Vue.extend({
 					compiled: this.lastCompiled
 				}
 			});
+		},
+		saveFunction: function(transformer) {
+			try {
+				var result = new Function('input', '$services', '$value', 'resolve', 'reject', transformer.content);
+				var parts = transformer.id.split(".");
+				var target = window;
+				for (var i = 0; i < parts.length - 1; i++) {
+					if (!target[parts[i]]) {
+						target[parts[i]] = {};
+					}
+					target = target[parts[i]];
+				}
+				target[parts[parts.length - 1]] = result;
+				// if we get this far, also recompile all transformers
+				var compiled = "";
+				this.functions.forEach(function(transformer) {
+					var parts = transformer.id.split(".");
+					// make global namespace
+					for (var i = 0; i < parts.length - 1; i++) {
+						compiled += "if (!" + parts[i] + ") " + (i == 0 ? "var " : "") + parts[i] + " = {};\n";
+					}
+					compiled += (parts.length == 1 ? "var " : "") + transformer.id + " = function(input, $services, $value, resolve, reject) {\n";
+					compiled += "\t" + transformer.content.replace(/\n/g, "\n\t") + "\n";
+					compiled += "}\n";
+				});
+				compiled += "Vue.service('functionRegistrar', {\n";
+				compiled += "	services: ['page'],\n";
+				compiled += "	activate: function(done) {\n"
+				// we only load the functions if we are not editing, otherwise they are available as per usual
+				compiled += "		if (!this.$services.page.editable) {\n";
+				this.functions.forEach(function(transformer) {
+					compiled += "			nabu.page.provide('page-function', {\n";
+					compiled += "				id: '" + transformer.id + "',\n";
+					compiled += "				async: " + !!transformer.async + ",\n";
+					compiled += "				implementation: " + transformer.id + ",\n";
+					compiled += "				inputs: " + (transformer.inputs ? JSON.stringify(transformer.inputs) : []) + ",\n";
+					compiled += "				outputs: " + (transformer.inputs ? JSON.stringify(transformer.outputs) : []) + "\n";
+					compiled += "			});\n";
+				});
+				compiled += "		}\n";
+				compiled += "		done();\n";
+				compiled += "	}\n";
+				compiled += "})\n";
+				this.$services.swagger.execute("nabu.web.page.core.rest.function.compiled", {body:{content: compiled}});
+			}
+			catch (exception) {
+				this.functionError = exception.message;
+				console.error("Could not create function", exception.message);
+			}
+			return this.$services.swagger.execute("nabu.web.page.core.rest.function.write", { name:transformer.id, body: {content: JSON.stringify(transformer, null, 2) } });
+		},
+		createFunction: function() {
+			var self = this;	
+			var name = prompt("Function Id");
+			if (name && this.functions.map(function(x) { return x.id.toLowerCase() }).indexOf(name.toLowerCase()) < 0) {
+				var transformer = { id:name, inputs:[], outputs:[], content: "" };
+				this.saveFunction(transformer).then(function() {
+					self.functions.push(transformer);
+				});
+			}
 		},
 		createStyle: function() {
 			var self = this;
@@ -724,29 +1066,41 @@ nabu.services.VueService(Vue.extend({
 				}
 			});
 		},
-		inject: function(link, callback) {
-			var script = document.createElement("script");
-			script.setAttribute("src", link);
-			script.setAttribute("type", "text/javascript");
-			
-			if (callback) {
-				// IE
-				if (script.readyState){  
-					script.onreadystatechange = function() {
-						if (script.readyState == "loaded" || script.readyState == "complete") {
-							script.onreadystatechange = null;
-							callback();
-						}
-					};
-				}
-				// rest
-				else { 
-					script.onload = function() {
-						callback();
-					};
+		inject: function(link, callback, async) {
+			// only inject it once!
+			var existing = document.head.querySelector('script[src="' + link + '"]');
+			if (existing) {
+				if (callback) {
+					callback();
 				}
 			}
-			document.head.appendChild(script);
+			else {
+				var script = document.createElement("script");
+				script.setAttribute("src", link);
+				script.setAttribute("type", "text/javascript");
+				if (async) {
+					script.setAttribute("async", "true");
+				}
+				
+				if (callback) {
+					// IE
+					if (script.readyState){  
+						script.onreadystatechange = function() {
+							if (script.readyState == "loaded" || script.readyState == "complete") {
+								script.onreadystatechange = null;
+								callback();
+							}
+						};
+					}
+					// rest
+					else { 
+						script.onload = function() {
+							callback();
+						};
+					}
+				}
+				document.head.appendChild(script);
+			}
 		},
 		canEdit: function() {
 			return !this.isServerRendering && this.editable;	
@@ -877,7 +1231,9 @@ nabu.services.VueService(Vue.extend({
 					isPage: true,
 					initial: page.content.initial,
 					roles: page.content.roles != null && page.content.roles.length > 0 ? page.content.roles : null,
-					slow: !page.content.initial && page.content.slow
+					slow: !page.content.initial && page.content.slow,
+					parent: page.content.pageParent,
+					defaultAnchor: page.content.defaultAnchor
 				};
 				
 				self.$services.router.unregister(self.alias(page));
@@ -963,7 +1319,7 @@ nabu.services.VueService(Vue.extend({
 			if (!arrays) {
 				arrays = [];
 			}
-			if (definition.properties) {
+			if (definition && definition.properties) {
 				var keys = Object.keys(definition.properties);
 				for (var i = 0; i < keys.length; i++) {
 					var property = definition.properties[keys[i]];
@@ -1170,6 +1526,7 @@ nabu.services.VueService(Vue.extend({
 					}
 				});
 			}
+			
 			// you can set parameters much like swagger input parameters
 			// that means you can set a name
 			// you can also set a default value and other stuff
@@ -1189,12 +1546,57 @@ nabu.services.VueService(Vue.extend({
 			}
 			return parameters;
 		},
+		// not used atm
+		getTranslatableParameters: function(part, translations) {
+			if (translations == null) {
+				translations = [];
+			}
+			var self = this;
+			if (part.$translations) {
+				part.$translations.forEach(function(translation) {
+					if (part[translation]) {
+						translations.push({
+							key: translation,
+							value: part[translation]
+						});
+					}
+				});
+			}
+			Object.keys(part).forEach(function(key) {
+				if (key != "$translations" && (!part.$translations || part.$translations.indexOf(key) < 0)) {
+					if (typeof(part[key]) == "object") {
+						self.getTranslatableParameters(part[key], translations);
+					}
+					else if (part[key] instanceof Array) {
+						part[key].forEach(function(single) {
+							if (typeof(single) == "object") {		
+								self.getTranslatableParameters(single, translations);
+							}
+						})
+					}
+				}
+			})
+			return translations;
+		},
+		notify: function(severity, message) {
+			this.validations.push({
+				severity: severity,
+				message: message,
+				title: message
+			});
+		},
 		getResolvedPageParameterType: function(type) {
 			if (type == null || ['string', 'boolean', 'number', 'integer'].indexOf(type) >= 0) {
 				return {type:type == null ? "string" : type};
 			}
 			else {
-				return this.$services.swagger.resolve(this.$services.swagger.definition(type));
+				try {
+					return this.$services.swagger.resolve(this.$services.swagger.definition(type));
+				}
+				catch (exception) {
+					this.notify("error", "Could not resolve type: " + type);
+					return {type: "string"};
+				}
 			}
 		},
 		getApplicationParameters: function() {
@@ -1290,7 +1692,7 @@ nabu.services.VueService(Vue.extend({
 			}
 			return keys;
 		},
-		registerHome: function(home) {
+		registerHome: function(home, homeUser) {
 			this.$services.router.unregister("home");
 			var self = this;
 			this.$services.router.register({
@@ -1299,10 +1701,19 @@ nabu.services.VueService(Vue.extend({
 					// the timeout disconnects the reroute from the current flow
 					// otherwise weird things happen
 					setTimeout(function() {
-						self.$services.router.route(home, parameters);
+						if (homeUser && self.$services.user.loggedIn) {
+							self.$services.router.route(homeUser, parameters);
+						}
+						else if (home) {
+							self.$services.router.route(home, parameters);
+						}
+						else {
+							self.$services.router.route("login", parameters);
+						}
 					}, 1)
 				},
-				url: "/"
+				url: "/",
+				priority: 1
 			});
 		}
 	},
@@ -1317,7 +1728,12 @@ nabu.services.VueService(Vue.extend({
 		},
 		home: function(newValue) {
 			if (newValue && !this.loading) {
-				this.registerHome(newValue);
+				this.registerHome(newValue, this.homeUser);
+			}
+		},
+		homeUser: function(newValue) {
+			if (newValue && !this.loading) {
+				this.registerHome(this.home, newValue);
 			}
 		}
 	}

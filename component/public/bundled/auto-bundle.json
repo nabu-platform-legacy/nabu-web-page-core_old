@@ -2,6 +2,22 @@
 	"namespace": "page", 
 	"name": "core", 
 	"resources": {
+		"images": {
+			"social": {
+				"facebook.svg": {
+					"url": "images/social/facebook.svg"
+				},
+				"twitter.svg": {
+					"url": "images/social/twitter.svg"
+				},
+				"linkedin.svg": {
+					"url": "images/social/linkedin.svg"
+				},
+				"pinterest.svg": {
+					"url": "images/social/pinterest.svg"
+				}
+			}
+		},
 		"page": {
 			"core": {
 				"components": {
@@ -88,7 +104,26 @@
 						"richtext.js": {
 							"url": "views/richtext/richtext.js"
 						}
-					}, 
+					},
+					"youtube": {
+						"youtube.tpl": {
+							"url": "views/youtube/youtube.tpl"
+						}, 
+						"youtube.js": {
+							"url": "views/youtube/youtube.js"
+						}
+					},
+					"share": {
+						"share.tpl": {
+							"url": "views/share/share.tpl"
+						}, 
+						"share.scss": {
+							"url": "views/share/share.scss"
+						}, 
+						"share.js": {
+							"url": "views/share/share.js"
+						}
+					},
 					"page": {
 						"addCell": {
 							"add.js": {
@@ -135,7 +170,17 @@
 						"actions.tpl": {
 							"url": "views/actions/actions.tpl"
 						}
-					}, 
+					},
+					"skeletons": {
+						"email": {
+							"email.tpl": {
+								"url": "views/skeletons/email/email.tpl"
+							}, 
+							"email.js": {
+								"url": "views/skeletons/email/email.js"
+							}
+						}
+					},
 					"providers": {
 						"fragment": {
 							"image": {
@@ -210,6 +255,12 @@
 							"text.js": {
 								"url": "views/providers/form/text.js"
 							}, 
+							"password.js": {
+								"url": "views/providers/form/password.js"
+							}, 
+							"file.js": {
+								"url": "views/providers/form/file.js"
+							}, 
 							"static-image.js": {
 								"url": "views/providers/form/static-image.js"
 							}, 
@@ -221,6 +272,12 @@
 							}, 
 							"date.js": {
 								"url": "views/providers/form/date.js"
+							}, 
+							"location.js": {
+								"url": "views/providers/form/location.js"
+							},
+							"address.js": {
+								"url": "views/providers/form/address.js"
 							}
 						}, 
 						"format": {

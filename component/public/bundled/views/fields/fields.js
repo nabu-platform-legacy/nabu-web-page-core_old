@@ -40,6 +40,15 @@ nabu.page.views.PageFieldsEdit = Vue.component("page-fields-edit", {
 			type: Boolean,
 			required: false,
 			default: false
+		},
+		allowArbitrary: {
+			type: Boolean,
+			required: false,
+			default: true
+		},
+		allowEvents: {
+			type: Boolean,
+			default: true
 		}
 	},
 	created: function() {
@@ -166,12 +175,13 @@ nabu.page.views.PageFieldsEdit = Vue.component("page-fields-edit", {
 				field.fragments.splice(index, 1, replacement);
 			}
 		},
-		addField: function() {
+		addField: function(arbitrary) {
 			this.cell.state[this.fieldsName].push({
 				label: null,
 				fragments: [],
 				hidden: null,
-				styles: []
+				styles: [],
+				arbitrary: !!arbitrary
 			});
 			// already add a fragment, a field is generally useless without it...
 			this.addFragment(this.cell.state[this.fieldsName][this.cell.state[this.fieldsName].length - 1]);
@@ -262,6 +272,21 @@ nabu.page.views.PageFields = Vue.component("page-fields", {
 			if (!state.class) {
 				Vue.set(state, "class", null);
 			}
+		},
+		getEvents: function() {
+			var result = {};
+			if (this.cell.state[this.fieldsName]) {
+				this.cell.state[this.fieldsName].forEach(function(field) {
+					if (field.fragments) {
+						field.fragments.forEach(function(fragment) {
+							if (fragment.clickEvent) {
+								result[fragment.clickEvent] = {};
+							}	
+						});
+					}	
+				});
+			}
+			return result;
 		}
 	}
 });
@@ -292,9 +317,20 @@ Vue.component("page-field", {
 		label: {
 			type: Boolean,
 			required: false
+		},
+		edit: {
+			type: Boolean,
+			required: false
 		}
 	},
 	methods: {
+		handleClick: function(fragment) {
+			if (fragment.clickEvent) {
+				var self = this;
+				var pageInstance = self.$services.page.getPageInstance(self.page, self);
+				pageInstance.emit(fragment.clickEvent, {});
+			}	
+		},
 		getDynamicClasses: function(field) {
 			var classes = null;
 			if (this.shouldStyle) {

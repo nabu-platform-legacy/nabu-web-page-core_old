@@ -28,12 +28,22 @@ nabu.page.views.Image = Vue.extend({
 	},
 	activate: function(done) {
 		var self = this;
+		var promises = [];
 		if (this.edit) {
-			this.load().then(done);
+			promises.push(this.load());
 		}
-		else {
-			done();
+		if (this.cell.state.inline && (this.cell.state.href || this.href)) {
+			var self = this;
+			var href = this.cell.state.href ? this.cell.state.href : this.href;
+			// if not absolute, make it so
+			if (href.indexOf("http://") != 0 && href.indexOf("https://") != 0 && href.indexOf("/") != 0) {
+				href = "${server.root()}" + href;
+			}
+			nabu.utils.ajax({ url: href }).then(function(response) {
+				self.inlineContent = response.responseText;
+			});
 		}
+		this.$services.q.all(promises).then(done, done);
 	},
 	created: function() {
 		this.normalize(this.cell.state);
@@ -42,7 +52,8 @@ nabu.page.views.Image = Vue.extend({
 		return {
 			configuring: false,
 			images: [],
-			files: []
+			files: [],
+			inlineContent: null
 		}
 	},
 	computed: {
@@ -57,6 +68,9 @@ nabu.page.views.Image = Vue.extend({
 			// if the href is not an absolute one (either globally absolute or application absolute), we inject the server root
 			if (href && href.substring(0, 7) != "http://" && href.substring(0, 8) != "https://" && href.substring(0, 1) != "/") {
 				href = "${server.root()}" + href;
+			}
+			if (href && href.substring(0, 7) != "http://" && href.substring(0, 8) != "https://" && this.cell.state.absolute) {
+				href = "${environment('url')}" + href;
 			}
 			return href;
 		}

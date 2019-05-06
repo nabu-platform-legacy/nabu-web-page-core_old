@@ -13,6 +13,7 @@ Vue.component("page-form-input-enumeration-operation-configure", {
 			+ "			:filter='function() { return getEnumerationFields(field.enumerationOperation) }'/>"
 			+ "		<n-form-combo v-if='field.enumerationOperation' v-model='field.enumerationOperationQuery' label='Enumeration Query'"
 			+ "			:filter='function() { return getEnumerationParameters(field.enumerationOperation) }'/>"
+			+ "		<n-form-combo v-if='field.enumerationOperation && field.enumerationOperationValue' :filter='function() { return getEnumerationParameters(field.enumerationOperation) }' v-model='field.enumerationOperationResolve' label='Resolve Field'/>"
 			+ "		<page-fields-edit :allow-multiple='false' fields-name='enumerationFields' v-if='field.enumerationOperation && field.enumerationOperationLabelComplex' :cell='{state:field}' :page='page' :keys='getEnumerationFields(field.enumerationOperation)' :allow-editable='false'/>"
 			+ "		<n-page-mapper v-if='field.enumerationOperation && hasMappableEnumerationParameters(field)'"
 			+ "			v-model='field.enumerationOperationBinding'"
@@ -100,12 +101,14 @@ Vue.component("page-form-input-enumeration-operation-configure", {
 		},
 		getEnumerationFields: function(operationId) {
 			var fields = [];
-			var resolved = this.$services.swagger.resolve(this.$services.swagger.operations[operationId].responses["200"]);
-			Object.keys(resolved.schema.properties).map(function(property) {
-				if (resolved.schema.properties[property].type == "array") {
-					nabu.utils.arrays.merge(fields, Object.keys(resolved.schema.properties[property].items.properties));
-				}
-			});
+			if (this.$services.swagger.operations[operationId]) {
+				var resolved = this.$services.swagger.resolve(this.$services.swagger.operations[operationId].responses["200"]);
+				Object.keys(resolved.schema.properties).map(function(property) {
+					if (resolved.schema.properties[property].type == "array") {
+						nabu.utils.arrays.merge(fields, Object.keys(resolved.schema.properties[property].items.properties));
+					}
+				});
+			}
 			return fields;
 		},
 		getEnumerationParameters: function(operationId) {
@@ -116,13 +119,15 @@ Vue.component("page-form-input-enumeration-operation-configure", {
 			var result = {
 				properties: {}
 			};
-			Object.keys(this.$services.page.getInputBindings(this.$services.swagger.operations[field.enumerationOperation])).map(function(key) {
-				if (key != field.enumerationOperationQuery) {
-					result.properties[key] = {
-						type: "string"
+			if (this.$services.swagger.operations[field.enumerationOperation]) {
+				Object.keys(this.$services.page.getInputBindings(this.$services.swagger.operations[field.enumerationOperation])).map(function(key) {
+					if (key != field.enumerationOperationQuery) {
+						result.properties[key] = {
+							type: "string"
+						}
 					}
-				}
-			});
+				});
+			}
 			return result;
 		},
 		hasMappableEnumerationParameters: function(field) {
@@ -133,8 +138,11 @@ Vue.component("page-form-input-enumeration-operation-configure", {
 });
 
 Vue.component("page-form-input-enumeration-operation", {
-	template: "<n-form-combo ref='form' :filter='enumerationFilter' :formatter='enumerationFormatter' :extracter='enumerationExtracter'"
+	template: "<n-form-combo ref='form' :filter='enumerationFilter' :formatter='enumerationFormatter' :extracter='enumerationExtracter' :resolver='enumerationResolver'"
+			+ "		:edit='!readOnly'"
+			+ "		:placeholder='placeholder'"
 			+ "		@input=\"function(newValue) { $emit('input', newValue) }\""
+			+ "		v-bubble:label"
 			+ "		:timeout='600'"
 			+ "		:label='label'"
 			+ "		:value='value'"
@@ -170,6 +178,14 @@ Vue.component("page-form-input-enumeration-operation", {
 		schema: {
 			type: Object,
 			required: false
+		},
+		readOnly: {
+			type: Boolean,
+			required: false
+		},
+		placeholder: {
+			type: String,
+			required: false
 		}
 	},
 	data: function() {
@@ -188,14 +204,20 @@ Vue.component("page-form-input-enumeration-operation", {
 		// enumerationOperationQuery: null,
 		// enumerationOperationBinding: {}
 		enumerationFilter: function(value) {
+			return this.enumerationFilterAny(value, false);
+		},
+		enumerationFilterAny: function(value, asResolve) {
 			if (!this.field.enumerationOperation) {
 				return [];
 			}
 			var parameters = {
 				limit: 20
 			};
-			if (this.field.enumerationOperationQuery) {
+			if (!asResolve && this.field.enumerationOperationQuery) {
 				parameters[this.field.enumerationOperationQuery] = value;
+			}
+			else if (asResolve && this.field.enumerationOperationResolve) {
+				parameters[this.field.enumerationOperationResolve] = value;
 			}
 			// map any additional bindings
 			if (this.field.enumerationOperationBinding) {
@@ -225,6 +247,12 @@ Vue.component("page-form-input-enumeration-operation", {
 				return result ? result : [];
 			});
 		},
+		enumerationResolver: function(value) {
+			if (this.field.enumerationOperationResolve && this.field.enumerationOperationValue) {
+				return this.enumerationFilterAny(value, true);
+			}
+			return value;
+		},
 		enumerationFormatter: function(value) {
 			if (value == null) {
 				return null;
@@ -241,17 +269,25 @@ Vue.component("page-form-input-enumeration-operation", {
 				
 				var self = this;
 				pageInstance.store(storageId, "");
-				var parameters = nabu.utils.objects.deepClone({
-					page: self.page,
-					cell: {state: self.field},
-					edit: false,
-					data: value,
-					label: false,
-					fieldsName: "enumerationFields"
-				});
-				var component = new nabu.page.views.PageFields({ propsData: parameters });
-				component.$mount();
-				pageInstance.store(storageId, component.$el.innerHTML.replace(/<[^>]+>/g, ""));
+				
+				setTimeout(function() {
+					var parameters = nabu.utils.objects.deepClone({
+						page: self.page,
+						cell: {state: self.field},
+						edit: false,
+						data: value,
+						label: false,
+						fieldsName: "enumerationFields"
+					});
+					var component = new nabu.page.views.PageFields({ propsData: parameters, updated: function() {
+						var content = component.$el.innerHTML.replace(/<[^>]+>/g, "");
+						if (pageInstance.retrieve(storageId) != content) {
+							pageInstance.store(storageId, content);
+						}
+					} });
+					component.$mount();
+				}, 1);
+				//pageInstance.store(storageId, component.$el.innerHTML.replace(/<[^>]+>/g, ""));
 				return pageInstance.retrieve(storageId);
 			}
 			else if (this.field.enumerationFormatter) {

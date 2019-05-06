@@ -46,6 +46,9 @@ Vue.mixin({
 				}
 			}
 			var application = {};
+			if (this.$services.page.title) {
+				application.title = this.$services.page.title;
+			}
 			this.$services.page.properties.map(function(x) {
 				application[x.key] = x.value;
 			});
@@ -102,12 +105,30 @@ nabu.page.views.Page = Vue.component("n-page", {
 		}
 	},
 	activate: function(done) {
+		// the page has a path, set it in the body so we can do additional stuff
+		// in the beginning we set this in the ready hook, however if you have a slow loading page it would only get set after the slow thingy ended
+		// however in the mean time your (presumably synchronous) skeletons have already loaded and perhaps even showing a nice loading icon but on the "old" background styling
+		if (this.page.content.path)	{
+			document.body.setAttribute("page", this.page.name);
+			document.body.setAttribute("category", this.page.content.category);
+		}
+		
+		var self = this;
+		var finalize = function() {
+			if (self.page.content.title) {
+				self.oldTitle = document.title;
+				document.title = self.$services.page.translate(self.$services.page.interpret(self.page.content.title, self));
+			}
+			done();
+		};
 		if (this.page.content.states.length) {
-			var self = this;
 			var promises = this.page.content.states.map(function(state) {
 				var parameters = {};
 				Object.keys(state.bindings).map(function(key) {
-					parameters[key] = self.get(state.bindings[key]);
+					//parameters[key] = self.get(state.bindings[key]);
+					if (state.bindings[key] != null) {
+						parameters[key] = self.$services.page.getBindingValue(self, state.bindings[key]);
+					}
 				});
 				try {
 					// can throw hard errors
@@ -122,17 +143,52 @@ nabu.page.views.Page = Vue.component("n-page", {
 					return promise;
 				}
 			});
-			this.$services.q.all(promises).then(done, done);
+			var inSelf = this.page.content.errorInSelf;
+			var routeError = function(error, counter) {
+				if (!counter) {
+					counter = 1;
+				}
+				if (!self.$el && counter < 5 && inSelf) {
+					Vue.nextTick(function() {
+						routeError(error, counter + 1);
+					});
+				}
+				else {
+					// masked route so we can reload
+					self.$services.router.route("error", {
+						code: "page-load-failed",
+						message: "%{error:The page you requested could not be loaded, please <a href='javascript:void(0)' @click='$window.location.reload()'>try again</a>}"
+					}, inSelf && self.$el ? nabu.utils.router.self(self.$el) : null, true);
+				}
+			};
+			this.$services.q.all(promises).then(finalize, function(error) {
+				done();
+				// if we are in edit mode, we can be expected to fix this
+				if (self.edit || self.$services.page.wantEdit) {
+					finalize();
+				}
+				else {
+					routeError(error, 0);
+				}
+			});
 		}
 		else {
-			done();
+			finalize();
 		}
+	},
+	beforeDestroy: function() {
+		if (this.oldTitle) {
+			document.title = this.oldTitle;
+		}	
+	},
+	mounted: function() {
+		console.log("mounted page", this.page.name, this.embedded);
 	},
 	created: function() {
 		console.log("creating page", this.page.name, this.stopRerender);
 		this.$services.page.setPageInstance(this.page, this);
+		var self = this;
 		if (this.page.content.parameters) {
-			var self = this;
 			this.page.content.parameters.map(function(x) {
 				if (x.name != null) {
 					// if it is not passed in as input, we set the default value
@@ -140,7 +196,7 @@ nabu.page.views.Page = Vue.component("n-page", {
 						// check if we have a content setting
 						var value = self.$services.page.getContent(x.global ? null : self.page.name, x.name);
 						if (value == null) {
-							value = x.default;
+							value = self.$services.page.interpret(x.default, self);
 						}
 						else {
 							value = value.content;
@@ -157,6 +213,18 @@ nabu.page.views.Page = Vue.component("n-page", {
 		if (this.editable) {
 			this.edit = true;
 		}
+		
+		if (!this.embedded) {
+			// initialize plugins
+			this.plugins.forEach(function(plugin) {
+				var component = Vue.component(plugin.component);
+				new component({propsData: {
+					page: self.page,
+					edit: self.edit,
+					instance: self
+				}});
+			});
+		}
 	},
 	beforeMount: function() {
 		this.$services.page.setPageInstance(this.page, this);
@@ -171,11 +239,12 @@ nabu.page.views.Page = Vue.component("n-page", {
 			return this.getEvents();
 		},
 		availableParameters: function() {
+			return this.$services.page.getAvailableParameters(this.page, null, true);
 			// there are all the events
-			var available = nabu.utils.objects.clone(this.getEvents());
+			//var available = nabu.utils.objects.clone(this.getEvents());
 			// and the page
-			available.page = this.$services.page.getPageParameters(this.page);
-			return available;
+			//available.page = this.$services.page.getPageParameters(this.page);
+			//return available;
 		},
 		classes: function() {
 			var classes = [];
@@ -191,11 +260,16 @@ nabu.page.views.Page = Vue.component("n-page", {
 			else {
 				classes.push("page-type-page");
 			}
+			classes.push("page-" + this.page.name);
 			return classes;
+		},
+		plugins: function() {
+			return nabu.page.providers("page-plugin").filter(function(x) { return x.target == "page" });
 		}
 	},
 	data: function() {
 		return {
+			refs: {},
 			edit: false,
 			// contains all the component instances
 			// the key is their id
@@ -226,6 +300,21 @@ nabu.page.views.Page = Vue.component("n-page", {
 		}
 	},
 	methods: {
+		validateStateName: function(name) {
+			var blacklisted = ["page", "application", "record", "state", "localState"];
+			var messages = [];
+			if (name && blacklisted.indexOf(name) >= 0) {
+				messages.push({
+					type: "error",
+					title: "%{This name is not allowed}"
+				});
+			}
+			return messages;
+		},
+		isGet: function(operationId) {
+			var operation = this.$services.swagger.operations[operationId];
+			return operation && operation.method && operation.method.toLowerCase() == "get";
+		},
 		getParameterTypes: function(value) {
 			var types = ['string', 'boolean', 'number', 'integer'];
 			nabu.utils.arrays.merge(types, Object.keys(this.$services.swagger.swagger.definitions));
@@ -370,8 +459,16 @@ nabu.page.views.Page = Vue.component("n-page", {
 		removeQuery: function(index) {
 			this.page.content.query.splice(index, 1);	
 		},
+		ref: function(reference) {
+			return this.refs[reference];
+		},
 		mounted: function(cell, row, state, component) {
 			var self = this;
+			
+			if (cell.ref) {
+				this.refs[cell.ref] = component;
+			}
+			
 			component.$on("hook:beforeDestroy", function() {
 				// clear subscriptions
 				if (component.$pageSubscriptions != null) {
@@ -379,6 +476,9 @@ nabu.page.views.Page = Vue.component("n-page", {
 					component.$pageSubscriptions.forEach(function(sub) {
 						sub();
 					});
+				}
+				if (cell.ref) {
+					self.refs[cell.ref] = null;
 				}
 				self.$services.page.destroy(component);
 			});
@@ -532,15 +632,18 @@ nabu.page.views.Page = Vue.component("n-page", {
 					"$configure": {properties:{}}
 				};
 				
+				var self = this;
+				this.cachedEvents = events;
+				
 				// check which events are picked up globally
 				if (this.page.content.globalEventSubscriptions) {
+					var globalEventDefinitions = this.$services.page.getGlobalEvents();
+					console.log("global events", JSON.stringify(globalEventDefinitions, null, 2));
 					this.page.content.globalEventSubscriptions.map(function(sub) {
-						events[sub.localName == null ? sub.globalName : sub.localName] = {properties:{}};	
+						console.log("wtf", sub.globalName, sub.localName, globalEventDefinitions[sub.globalName]);
+						events[sub.localName == null ? sub.globalName : sub.localName] = globalEventDefinitions[sub.globalName] ? globalEventDefinitions[sub.globalName] : {properties:{}};	
 					});
 				}
-				
-				this.cachedEvents = events;
-				var self = this;
 				
 				// your page actions can trigger success events
 				if (this.page.content.actions) {
@@ -648,8 +751,31 @@ nabu.page.views.Page = Vue.component("n-page", {
 			
 			// check all the actions to see if we need to run something
 			this.page.content.actions.map(function(action) {
+				
 				if (action.on == name) {
 					var promise = self.$services.q.defer();
+					
+					var runFunction = function() {
+						if (action.isSlow) {
+							self.$wait({promise: promise});
+						}
+						var func = self.$services.page.getRunnableFunction(action.function);
+						if (!func) {
+							throw "Could not find function: " + action.function; 
+						}
+						var input = {};
+						if (action.bindings) {
+							var pageInstance = self;
+							Object.keys(action.bindings).forEach(function(key) {
+								if (action.bindings[key]) {
+									var value = self.$services.page.getBindingValue(pageInstance, action.bindings[key], self);
+									self.$services.page.setValue(input, key, value);
+								}
+							});
+						}
+						return self.$services.page.runFunction(func, input, self, promise);
+					}
+					
 					promises.push(promise);
 					var parameters = {};
 					Object.keys(action.bindings).map(function(key) {
@@ -664,31 +790,67 @@ nabu.page.views.Page = Vue.component("n-page", {
 						}
 					};
 					
+					var date = new Date();
+					var stop = function(error) {
+						if (self.$services.analysis && self.$services.analysis.emit && action.name) {
+							self.$services.analysis.emit("trigger-" + self.page.name, action.name, 
+								{time: new Date().getTime() - date.getTime(), error: error}, true);
+						}
+					};
+					
+					promise.then(function() { stop() }, function(error) { stop(error) });
+					
 					if (action.confirmation) {
-						self.$confirm({message:action.confirmation}).then(function() {
+						self.$confirm({message:self.$services.page.translate(action.confirmation)}).then(function() {
+							var element = null;
+							var async = false;
+							// already get the element, it can be triggered with or without a route
 							if (action.scroll) {
-								eventReset();
 								var element = document.querySelector(action.scroll);
 								if (!element) {
 									element = document.getElementById(action.scroll);
 								}
-								if (element) {
-									element.scrollIntoView();
+							}
+							if (action.url) {
+								var url = self.$services.page.interpret(action.url, self);
+								if (action.anchor) {
+									window.open(url);
+								}
+								else {
+									window.location = url;
 								}
 							}
 							else if (action.route) {
+								var routePromise = null;
 								eventReset();
 								if (action.anchor == "$blank") {
-									console.log("routing", action.route, parameters, 
-										self.$services.router.template(action.route, parameters));
 									window.open(self.$services.router.template(action.route, parameters));
 								}
 								else if (action.anchor == "$window") {
 									window.location = self.$services.router.template(action.route, parameters);
 								}
 								else {
-									self.$services.router.route(action.route, parameters, action.anchor ? action.anchor : null, action.anchor ? true : false);
+									routePromise = self.$services.router.route(action.route, parameters, action.anchor ? action.anchor : null, action.anchor ? true : false);
 								}
+								if (element) {
+									if (routePromise && routePromise.then) {
+										routePromise.then(function() {
+											element.scrollIntoView();
+										});
+									}
+									else {
+										element.scrollIntoView();
+									}
+								}
+							}
+							else if (action.scroll) {
+								eventReset();
+								if (element) {
+									element.scrollIntoView();
+								}
+							}
+							else if (action.operation && self.isGet(action.operation) && action.anchor == "$blank") {
+								window.open(self.$services.swagger.parameters(action.operation, parameters).url, "_blank");
 							}
 							else if (action.operation) {
 								if (action.isSlow) {
@@ -698,9 +860,9 @@ nabu.page.views.Page = Vue.component("n-page", {
 								if (operation.method == "get" && operation.produces && operation.produces.length && operation.produces[0] == "application/octet-stream") {
 									window.location = self.$services.swagger.parameters(action.operation, parameters).url;
 									eventReset();
-									promise.resolve();
 								}
 								else {
+									async = true;
 									self.$services.swagger.execute(action.operation, parameters).then(function(result) {
 										if (action.event) {
 											self.emit(action.event, result);
@@ -710,8 +872,13 @@ nabu.page.views.Page = Vue.component("n-page", {
 									}, promise);
 								}
 							}
+							else if (action.function) {
+								runFunction();
+							}
 							else {
 								eventReset();
+							}
+							if (!async) {
 								promise.resolve();
 							}
 						}, function() {
@@ -719,7 +886,17 @@ nabu.page.views.Page = Vue.component("n-page", {
 						})
 					}
 					else {
-						if (action.scroll) {
+						var async = false;
+						if (action.url) {
+							var url = self.$services.page.interpret(action.url, self);
+							if (action.anchor) {
+								window.open(url);
+							}
+							else {
+								window.location = url;
+							}
+						}
+						else if (action.scroll) {
 							eventReset();
 							var element = document.querySelector(action.scroll);
 							if (!element) {
@@ -741,6 +918,9 @@ nabu.page.views.Page = Vue.component("n-page", {
 								self.$services.router.route(action.route, parameters, action.anchor ? action.anchor : null, action.anchor ? true : false);
 							}
 						}
+						else if (action.operation && self.isGet(action.operation) && action.anchor == "$blank") {
+							window.open(self.$services.swagger.parameters(action.operation, parameters).url, "_blank");
+						}
 						else if (action.operation) {
 							if (action.isSlow) {
 								self.$wait({promise: promise});
@@ -749,9 +929,9 @@ nabu.page.views.Page = Vue.component("n-page", {
 							if (operation.method == "get" && operation.produces && operation.produces.length && operation.produces[0] == "application/octet-stream") {
 								window.location = self.$services.swagger.parameters(action.operation, parameters).url;
 								eventReset();
-								promise.resolve();
 							}
 							else {
+								async = true;
 								self.$services.swagger.execute(action.operation, parameters).then(function(result) {
 									if (action.event) {
 										self.emit(action.event, result);
@@ -761,8 +941,13 @@ nabu.page.views.Page = Vue.component("n-page", {
 								}, promise);
 							}
 						}
+						else if (action.function) {
+							runFunction();
+						}
 						else {
 							eventReset();
+						}
+						if (!async) {
 							promise.resolve();
 						}
 					}
@@ -776,6 +961,56 @@ nabu.page.views.Page = Vue.component("n-page", {
 						promises.push(result);
 					}
 				});
+			}
+			
+			// check states that have to be refreshed
+			if (this.page.content.states.length) {
+				nabu.utils.arrays.merge(promises, this.page.content.states.filter(function(x) { return x.refreshOn != null && x.refreshOn.indexOf(name) >= 0 }).map(function(state) {
+					var parameters = {};
+					Object.keys(state.bindings).map(function(key) {
+						parameters[key] = self.get(state.bindings[key]);
+					});
+					try {
+						// can throw hard errors
+						return self.$services.swagger.execute(state.operation, parameters).then(function(result) {
+							if (self.variables[state.name] != null) {
+								if (self.variables[state.name] instanceof Array) {
+									self.variables[state.name].splice(0);
+									if (result instanceof Array) {
+										nabu.utils.arrays.merge(self.variables[state.name], result);
+									}
+									else {
+										self.variables[state.name].push(result);
+									}
+								}
+								else {
+									var resultKeys = Object.keys(result);
+									Object.keys(self.variables[state.name]).forEach(function(key) {
+										if (resultKeys.indexOf(key) < 0) {
+											self.variables[state.name] = null;
+										}
+									});
+									// make sure we use vue.set to trigger other reactivity
+									resultKeys.forEach(function(key) {
+										Vue.set(self.variables[state.name][key], result[key]);
+									});
+									// TODO: do a proper recursive merge to maintain reactivity with deeply nested
+									
+									//nabu.utils.objects.merge(self.variables[state.name], result);
+								}
+							}
+							else {
+								Vue.set(self.variables, state.name, result ? result : null);
+							}
+						});
+					}
+					catch (exception) {
+						console.error("Could not execute", state.operation, exception);
+						var promise = self.$services.q.defer();
+						promise.reject(exception);
+						return promise;
+					}
+				}));
 			}
 			
 			// remove all the closed stuff for this event, we may want to reopen something
@@ -814,6 +1049,16 @@ nabu.page.views.Page = Vue.component("n-page", {
 			}
 			if (name == "page") {
 				return this.parameters;
+			}
+			else if (name == "application.title") {
+				return this.$services.page.title;
+			}
+			else if (name.indexOf("application.") == 0) {
+				var name = name.substring("application.".length);
+				var value = this.$services.page.properties.filter(function(x) {
+					return x.key == name;
+				})[0];
+				return value ? value.value : null;
 			}
 			else if (name.indexOf("page.") == 0) {
 				var name = name.substring("page.".length);
@@ -952,7 +1197,7 @@ nabu.page.views.Page = Vue.component("n-page", {
 			var parts = null;
 			var updateUrl = false;
 			// update something in the page parameters
-			if (name.indexOf("page.") == 0) {
+			if (name.indexOf && name.indexOf("page.") == 0) {
 				if (!this.masked) {
 					updateUrl = true;
 				}
@@ -988,24 +1233,32 @@ nabu.page.views.Page = Vue.component("n-page", {
 				}
 				parts = name.substring("page.".length).split(".");
 			}
-			else {
+			else if (name.split) {
 				parts = name.split(".");
 				target = this.variables;
 			}
-			for (var i = 0; i < parts.length - 1; i++) {
-				if (!target[parts[i]]) {
-					Vue.set(target, parts[i], {});
+			// TODO: if single input, single output => can automatically bypass transformer?
+			// or set a reverse transformer?
+			// for now, transformers are only for going forward, not syncing data back, use events + reload if needed atm
+			if (parts && target) {
+				for (var i = 0; i < parts.length - 1; i++) {
+					if (!target[parts[i]]) {
+						Vue.set(target, parts[i], {});
+					}
+					target = target[parts[i]];
 				}
-				target = target[parts[i]];
+				Vue.set(target, parts[parts.length - 1], value);
+				if (updateUrl) {
+					var route = this.$services.router.get(this.$services.page.alias(this.page));
+					this.$services.router.router.updateUrl(
+						route.alias,
+						route.url,
+						this.parameters,
+						route.query)
+				}
 			}
-			Vue.set(target, parts[parts.length - 1], value);
-			if (updateUrl) {
-				var route = this.$services.router.get(this.$services.page.alias(this.page));
-				this.$services.router.router.updateUrl(
-					route.alias,
-					route.url,
-					this.parameters,
-					route.query)
+			else {
+				console.log("Could not set", name, value);
 			}
 		},
 		pageTag: function() {
@@ -1023,7 +1276,18 @@ nabu.page.views.Page = Vue.component("n-page", {
 				}
 			});
 			this.lastParameters = JSON.stringify(newValue);
-			this.rerender(changedValues);
+			//this.rerender(changedValues);
+		},
+		'page.content.globalEvents': {
+			deep: true,
+			handler: function(newValue) {
+				var self = this;
+				if (newValue) {
+					newValue.forEach(function(globalEvent) {
+						globalEvent.properties = self.getEvents()[globalEvent.localName];
+					});
+				}
+			}
 		}
 	}
 });
@@ -1230,17 +1494,34 @@ nabu.page.views.PageRows = Vue.component("n-page-rows", {
 				return this.mapCalculated(row.cells);
 			}
 		},
+		getSideBarStyles: function(cell) {
+			var styles = [];
+			if (cell.width != null) {
+				if (typeof(cell.width) == "number" || (cell.width.match && cell.width.match(/^[0-9.]+$/))) {
+					styles.push({'flex-grow': cell.width});
+				}
+				else {
+					styles.push({'min-width': cell.width});
+				}
+			}
+			return styles;
+		},
 		getStyles: function(cell) {
 			var width = typeof(cell.width) == "undefined" ? 1 : cell.width;
 			var styles = [];
-			if (typeof(width) == "number" || (width.match && width.match(/^[0-9.]+$/))) {
-				styles.push({'flex-grow': width});
-			}
-			else {
-				styles.push({'min-width': width});
+			if (width != null) {
+				if (typeof(width) == "number" || (width.match && width.match(/^[0-9.]+$/))) {
+					styles.push({'flex-grow': width});
+				}
+				else {
+					styles.push({'min-width': width});
+				}
 			}
 			if (cell.height) {
 				styles.push({'height': cell.height});
+			}
+			if ((this.edit || this.$services.page.wantEdit) && cell.name) {
+				styles.push({"border": "solid 2px " + this.getNameColor(cell.name), "border-style": "none solid solid solid"})
 			}
 			return styles;
 		},
@@ -1337,8 +1618,8 @@ nabu.page.views.PageRows = Vue.component("n-page-rows", {
 		close: function(cell) {
 			var self = this;
 			var pageInstance = self.$services.page.getPageInstance(self.page, self);
-			if (cell.on) {
-				Vue.set(pageInstance.closed, cell.id, cell.on);
+			if (cell.on || cell.closeable) {
+				Vue.set(pageInstance.closed, cell.id, cell.on ? cell.on : "$any");
 			}
 			else {
 				this.$parent.$emit("close");
@@ -1443,17 +1724,23 @@ nabu.page.views.PageRows = Vue.component("n-page-rows", {
 					return false;
 				}
 			}
+			else if (cell.closeable && pageInstance.closed[cell.id]) {
+				return false;
+			}
 			var providers = [];
 			nabu.page.providers("page-enumerate").map(function(x) {
 				providers.push(x.name);
 			});
-			return Object.keys(cell.bindings).reduce(function(consensus, name) {
+			var consensus =  Object.keys(cell.bindings).reduce(function(consensus, name) {
 				// fixed values are always ok
-				if (cell.bindings[name] && cell.bindings[name].indexOf("fixed") == 0) {
+				if (cell.bindings[name] && cell.bindings[name].indexOf && cell.bindings[name].indexOf("fixed") == 0) {
+					return consensus;
+				}
+				else if (cell.bindings[name] && cell.bindings[name].label && cell.bindings[name].label == "fixed") {
 					return consensus;
 				}
 				// always allow enumerated values
-				else if (cell.bindings[name] && providers.indexOf(cell.bindings[name].split(".")[0]) >= 0) {
+				else if (cell.bindings[name] && cell.bindings[name].split && providers.indexOf(cell.bindings[name].split(".")[0]) >= 0) {
 					return consensus;
 				}
 				// if we have a bound value and it does not originate from the (ever present) page, it must come from an event
@@ -1470,6 +1757,7 @@ nabu.page.views.PageRows = Vue.component("n-page-rows", {
 				}*/
 				return consensus;
 			}, true);
+			return consensus;
 		},
 		// changedValues is an array of field names that have changed, e.g. "page.test" or "select.$all" etc
 		shouldRerenderCell: function(cell, changedValues) {
@@ -1532,6 +1820,9 @@ nabu.page.views.PageRows = Vue.component("n-page-rows", {
 		},
 		getRowEditStyle: function(row) {
 			return 'background-color:' + this.getNameColor(row.name) + '; color: #fff';	
+		},
+		getCellEditStyle: function(cell) {
+			return 'background-color:' + this.getNameColor(cell.name) + '; color: #fff';	
 		},
 		getNameColor: function(name) {
 			var saturation = 80;

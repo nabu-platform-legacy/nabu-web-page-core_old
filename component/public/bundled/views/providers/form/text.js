@@ -1,5 +1,8 @@
 Vue.component("page-form-input-text-configure", {
-	template: "<n-form-combo v-model='field.textType' label='Text Type' :items=\"['text', 'area', 'number', 'color', 'email', 'password']\"/>",
+	template: "<n-form-section><n-form-combo v-model='field.textType' label='Text Type' :items=\"['text', 'area', 'number', 'color', 'email', 'password']\"/>"
+		+ "	<n-form-text v-model='field.regexLabel' label='Regex Label'/>"
+		+ "	<n-page-mapper v-model='field.bindings' :from='availableParameters' :to='[\"validator\"]'/>"
+		+ "</n-form-section>",
 	props: {
 		cell: {
 			type: Object,
@@ -19,15 +22,27 @@ Vue.component("page-form-input-text-configure", {
 		if (!this.field.textType) {
 			Vue.set(this.field, "textType", null);
 		}
+		if (!this.field.bindings) {
+			Vue.set(this.field, "bindings", {});
+		}
+	},
+	computed: {
+		availableParameters: function() {
+			return this.$services.page.getAvailableParameters(this.page, this.cell, true);
+		}
 	}
 });
 
 Vue.component("page-form-input-text", {
 	template: "<n-form-text :type='textType' ref='form'"
+			+ "		:edit='!readOnly'"
+			+ "		:placeholder='placeholder'"
 			+ "		:schema='schema'"
+			+ "		:pattern-comment='field.regexLabel ? $services.page.translate(field.regexLabel) : null'"
 			+ "		@input=\"function(newValue) { $emit('input', newValue) }\""
 			+ "		:label='label'"
 			+ "		:value='value'"
+			+ "		:validator='getValidator()'"
 			+ "		:name='field.name'"
 			+ "		:timeout='timeout'"
 			+ "		:disabled='disabled'/>",
@@ -61,6 +76,14 @@ Vue.component("page-form-input-text", {
 		schema: {
 			type: Object,
 			required: false
+		},
+		readOnly: {
+			type: Boolean,
+			required: false
+		},
+		placeholder: {
+			type: String,
+			required: false
 		}
 	},
 	computed: {
@@ -71,6 +94,12 @@ Vue.component("page-form-input-text", {
 	methods: {
 		validate: function(soft) {
 			return this.$refs.form.validate(soft);
+		},
+		getValidator: function() {
+			if (this.field.bindings && this.field.bindings.validator) {
+				var pageInstance = this.$services.page.getPageInstance(this.page, this);
+				return this.$services.page.getBindingValue(pageInstance, this.field.bindings.validator, this);
+			}
 		}
 	}
 });

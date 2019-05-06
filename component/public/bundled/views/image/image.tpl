@@ -8,9 +8,11 @@
 						<n-form-text v-model="cell.state.title" label="Title"/>
 						<n-form-text v-model="cell.state.height" label="Height"/>
 						<n-form-text v-model="cell.state.imagePath" label="Image Path"/>
+						<n-form-switch v-model="cell.state.absolute" label="Absolute" v-if="!cell.state.inline"/>
 						<n-form-combo v-model="cell.state.size" label="Sizing"
 							:nillable="false"
 							:items="['cover', 'contain', 'native']"/>
+						<n-form-switch v-model="cell.state.inline" label="Inline Rendering"/>
 					</n-collapsible>
 					<n-collapsible title="Image Content" class="images">
 						<n-input-file v-model="files" @change="upload" :types="['image']"/>
@@ -24,7 +26,10 @@
 				</n-form-section>
 			</n-form>
 		</n-sidebar>
-		<img v-if="cell.state.size == 'native' && (cell.state.href || href)" :src="cell.state.href ? '${server.root()}' + cell.state.href : href"
+		<div ref="inline" v-content="inlineContent" v-if="cell.state.inline" class="image" 
+			:style="{'height': cell.state.height ? cell.state.height : 'inherit'}"
+			:title="cell.state.title"></div>
+		<img v-else-if="cell.state.size == 'native' && (cell.state.href || href)" :src="fullHref"
 			:style="{'height': cell.state.height ? cell.state.height : 'inherit'}"
 			:title="cell.state.title"/>
 		<div v-else-if="cell.state.href || href" class="image" 

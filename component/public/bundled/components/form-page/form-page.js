@@ -17,9 +17,11 @@ Vue.component("n-form-page", {
 		}
 	},
 	created: function() {
+		var counter = this.$services.page.counter++;
 		this.page = {
-			name: "dynamic-page-" + this.$services.page.counter++,
-			content: this.$services.page.normalize({})
+			name: "dynamic-page-" + counter,
+			counter: counter,
+			content: this.$services.page.normalize(typeof(this.value) == "string" ? JSON.parse(this.value) : {})
 		};
 	},
 	methods: {
