@@ -226,6 +226,7 @@
 				><button :style="rowButtonStyle(row)" @click="row.collapsed = !row.collapsed"><span class="fa" :class="{'fa-minus-square': !row.collapsed, 'fa-plus-square': row.collapsed }"></span></button>
 			</div>
 			<div v-if="row.customId" class="custom-row custom-id" :id="row.customId"><!-- to render stuff in without disrupting the other elements here --></div>
+			<div v-if="edit && getCalculatedCells(row).length == 0" class="page-cell page-cell-placeholder">empty row</div>			
 			<component :is="cellTagFor(row, cell)" :style="getStyles(cell)" v-for="cell in getCalculatedCells(row)" v-if="shouldRenderCell(row, cell)" 
 					:id="page.name + '_' + row.id + '_' + cell.id" 
 					:class="[{'clickable': !!cell.clickEvent}, {'page-cell': edit || !cell.target || cell.target == 'page', 'page-prompt': cell.target == 'prompt' || cell.target == 'sidebar'}, cell.class ? cell.class : null, {'has-page': hasPageRoute(cell), 'is-root': root} ]" 
