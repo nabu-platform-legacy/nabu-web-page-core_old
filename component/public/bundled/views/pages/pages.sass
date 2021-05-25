@@ -1,0 +1,80 @@
+$alpha-accent-color: #333 !default;
+$alpha-accent-contrast: #fff !default;
+$alpha-color: #fff !default;
+
+.pages {
+	.panes {
+		display: flex;
+		.pane {
+			max-width: 50%;
+			flex-grow: 1;
+			+ .pane {
+				border-left: solid 2px #fff;
+			}
+		}
+	}
+	h1 {
+		font-size: 1.2rem;
+		text-align: center;
+		border: $border;
+		border-style: none none solid none;
+		padding: 0.7rem;
+		margin: 0;
+		background-color: #333;
+		color: white;
+		.subscript {
+			margin-left: 0.3rem;
+			display: inline-block;
+		}
+	}
+	h2 {
+		background-color: #f0f0b9;
+		border: solid 1px darken(#f0f0b9, 30%);
+		border-style: solid none solid none;
+		color: #333;
+		padding: 0.3rem 1rem;
+		margin: 0 !important;
+		font-size: 0.7rem !important;
+		text-transform: uppercase;
+		text-align: left;
+		.fa {
+			margin-left: 0.3rem;
+			&:before {
+				font-size: 11px;
+			}
+		}
+	}
+	.introduction {
+		text-align: center;
+		width: 50%;
+		margin: auto;
+	}
+	.main {
+		.n-collapsible-content {
+			margin: auto;
+		}
+	}
+	
+	.n-ace {
+		min-height: 50rem;
+	}
+	.danger.message {
+		padding: 1rem;
+		margin: 1rem 0;
+	}
+}
+
+.list-item {
+	background-color: $alpha-color;
+}
+
+[template="nabu-create-page"], [template="nabu-pages-paste"] {
+	overflow: visible !important;
+}
+.nabu-pages-paste, .nabu-create-page {
+	background-color: #fff;
+	padding: 2rem;
+	footer {
+		text-align: right;
+	}
+}

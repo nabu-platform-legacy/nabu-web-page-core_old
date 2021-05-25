@@ -443,6 +443,12 @@ window.addEventListener("load", function() {
 			namespace: "nabu.page"
 		});
 		nabu.page.provide("page-form-input", { 
+			component: "page-form-input-enumeration-array",
+			configure: "page-form-input-enumeration-array-configure", 
+			name: "enumeration-array",
+			namespace: "nabu.page"
+		});
+		nabu.page.provide("page-form-input", { 
 			component: "page-form-input-static-image", 
 			configure: "page-form-input-static-image-configure", 
 			name: "static-image",
